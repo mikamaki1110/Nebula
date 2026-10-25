@@ -1,0 +1,53 @@
+{
+  "name": "nebula-desktop",
+  "productName": "Nebula",
+  "version": "1.3.0",
+  "description": "Hardware-Monitor für Windows: Temperaturen, Auslastung, Prozesse und alle Bauteile deines PCs",
+  "main": "main.js",
+  "author": "Nebula",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.0",
+    "systeminformation": "^5.25.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.nebula.desktop",
+    "productName": "Nebula",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "lhm.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Nebula",
+      "artifactName": "Nebula-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Nebula-Portable-${version}.${ext}"
+    }
+  }
+}

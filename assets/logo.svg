@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="nb-core" cx="50%" cy="45%" r="55%">
+      <stop offset="0" stop-color="#FFF4C8" />
+      <stop offset="0.45" stop-color="#FFD25A" />
+      <stop offset="1" stop-color="#F06A2A" />
+    </radialGradient>
+  </defs>
+  <!-- Pins -->
+  <g stroke="#E8EEF5" stroke-width="3" stroke-linecap="round">
+    <path d="M24 4.5v6M32 4.5v6M40 4.5v6M24 53.5v6M32 53.5v6M40 53.5v6M4.5 24h6M4.5 32h6M4.5 40h6M53.5 24h6M53.5 32h6M53.5 40h6" />
+  </g>
+  <!-- Chip -->
+  <rect x="11" y="11" width="42" height="42" rx="10" fill="#151A22" stroke="#E8EEF5" stroke-width="3" />
+  <!-- Isothermen -->
+  <path d="M33 18.5c8.6 0 13.5 5.6 13.5 12.6S41 45.5 31.6 45.5c-8 0-14.1-5.3-14.1-12.8S24.1 18.5 33 18.5z"
+        fill="none" stroke="#A42E7B" stroke-width="2.6" />
+  <path d="M34.6 23.6c4.9 0 7.9 3.4 7.9 7.3s-3.4 8.6-8.8 8.6c-4.6 0-7.9-3.1-7.9-7.4s3.8-8.5 8.8-8.5z"
+        fill="none" stroke="#F06A2A" stroke-width="2.6" />
+  <!-- Hotspot -->
+  <circle cx="35.4" cy="30.8" r="4.4" fill="url(#nb-core)" />
+</svg>

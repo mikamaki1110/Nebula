@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
+  <title>Nebula</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Wärmebild-Hintergrund (background.js) -->
+  <canvas id="bg-canvas" aria-hidden="true"></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <!-- ===== Titelleiste ===== -->
+  <header class="titlebar">
+    <div class="titlebar__brand"><svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+  <defs>
+    <radialGradient id="nb-core-a" cx="50%" cy="45%" r="55%">
+      <stop offset="0" stop-color="#FFF4C8" />
+      <stop offset="0.45" stop-color="#FFD25A" />
+      <stop offset="1" stop-color="#F06A2A" />
+    </radialGradient>
+  </defs>
+  <!-- Pins -->
+  <g stroke="#E8EEF5" stroke-width="3" stroke-linecap="round">
+    <path d="M24 4.5v6M32 4.5v6M40 4.5v6M24 53.5v6M32 53.5v6M40 53.5v6M4.5 24h6M4.5 32h6M4.5 40h6M53.5 24h6M53.5 32h6M53.5 40h6" />
+  </g>
+  <!-- Chip -->
+  <rect x="11" y="11" width="42" height="42" rx="10" fill="#151A22" stroke="#E8EEF5" stroke-width="3" />
+  <!-- Isothermen -->
+  <path d="M33 18.5c8.6 0 13.5 5.6 13.5 12.6S41 45.5 31.6 45.5c-8 0-14.1-5.3-14.1-12.8S24.1 18.5 33 18.5z"
+        fill="none" stroke="#A42E7B" stroke-width="2.6" />
+  <path d="M34.6 23.6c4.9 0 7.9 3.4 7.9 7.3s-3.4 8.6-8.8 8.6c-4.6 0-7.9-3.1-7.9-7.4s3.8-8.5 8.8-8.5z"
+        fill="none" stroke="#F06A2A" stroke-width="2.6" />
+  <!-- Hotspot -->
+  <circle cx="35.4" cy="30.8" r="4.4" fill="url(#nb-core-a)" />
+</svg><span class="wordmark">Nebula</span></div>
+    <div class="titlebar__clock" id="clock">--:--</div>
+    <div class="titlebar__controls">
+      <button class="wc" id="wc-min" title="Minimieren"><svg viewBox="0 0 10 10"><path d="M1 5h8" /></svg></button>
+      <button class="wc" id="wc-max" title="Maximieren"><svg viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" /></svg></button>
+      <button class="wc wc--close" id="wc-close" title="Schließen"><svg viewBox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" /></svg></button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <!-- ===== Sidebar ===== -->
+    <nav class="sidebar glass">
+      <button class="nav active" data-view="dashboard"><span class="nav__icon">▦</span>Dashboard</button>
+      <button class="nav" data-view="hardware"><span class="nav__icon">◧</span>Hardware</button>
+      <button class="nav" data-view="sensors"><span class="nav__icon">♨</span>Sensoren</button>
+      <button class="nav" data-view="processes"><span class="nav__icon">≡</span>Prozesse</button>
+      <button class="nav" data-view="notes"><span class="nav__icon">✎</span>Notizen</button>
+      <button class="nav" data-view="settings"><span class="nav__icon">⚙</span>Einstellungen</button>
+      <div class="sidebar__foot">
+        <div class="mini-stat"><span>Prozesse</span><strong id="side-procs">—</strong></div>
+        <div class="mini-stat"><span>Laufzeit</span><strong id="side-uptime">—</strong></div>
+        <div class="shortcut"><kbd>Strg</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd><small>ein-/ausblenden</small></div>
+      </div>
+    </nav>
+
+    <main class="content">
+      <!-- ================= DASHBOARD ================= -->
+      <section class="view active" id="view-dashboard">
+        <div class="hero">
+          <div class="hero__main">
+            <p class="hero__greet" id="greeting">Willkommen</p>
+            <h1 class="hero__title" id="hero-host">Dein PC</h1>
+            <p class="hero__status" id="hero-status" data-state="na"><span class="status-dot"></span><span id="hero-status-text">Sensoren werden gelesen</span></p>
+          </div>
+          <dl class="hero__spec" id="hero-spec"></dl>
+        </div>
+
+        <div class="banner glass hidden" id="temp-banner">
+          <span class="banner__icon">♨</span>
+          <div>
+            <strong>Temperaturen nicht verfügbar</strong>
+            <p class="muted">Windows gibt CPU-Temperaturen meist nicht frei. Mit LibreHardwareMonitor bekommst du alle Werte.</p>
+          </div>
+          <button class="btn btn--primary btn--small" data-goto="sensors">Einrichten</button>
+        </div>
+
+        <div class="tiles">
+          <div class="card glass tile" id="t-cpu">
+            <div class="ring-wrap">
+              <svg class="ring" viewBox="0 0 120 120"><circle class="ring__bg" cx="60" cy="60" r="52" /><circle class="ring__fg" cx="60" cy="60" r="52" /></svg>
+              <div class="tile__center"><span class="tile__value">—</span><span class="tile__unit">Last</span></div>
+            </div>
+            <p class="tile__label">CPU</p><p class="tile__sub muted">—</p>
+          </div>
+          <div class="card glass tile" id="t-cputemp">
+            <div class="ring-wrap">
+              <svg class="ring" viewBox="0 0 120 120"><circle class="ring__bg" cx="60" cy="60" r="52" /><circle class="ring__fg" cx="60" cy="60" r="52" /></svg>
+              <div class="tile__center"><span class="tile__value">—</span><span class="tile__unit">°C</span></div>
+            </div>
+            <p class="tile__label">CPU-Temperatur</p><p class="tile__sub muted">—</p>
+          </div>
+          <div class="card glass tile" id="t-gpu">
+            <div class="ring-wrap">
+              <svg class="ring" viewBox="0 0 120 120"><circle class="ring__bg" cx="60" cy="60" r="52" /><circle class="ring__fg" cx="60" cy="60" r="52" /></svg>
+              <div class="tile__center"><span class="tile__value">—</span><span class="tile__unit">Last</span></div>
+            </div>
+            <p class="tile__label">GPU</p><p class="tile__sub muted">—</p>
+          </div>
+          <div class="card glass tile" id="t-gputemp">
+            <div class="ring-wrap">
+              <svg class="ring" viewBox="0 0 120 120"><circle class="ring__bg" cx="60" cy="60" r="52" /><circle class="ring__fg" cx="60" cy="60" r="52" /></svg>
+              <div class="tile__center"><span class="tile__value">—</span><span class="tile__unit">°C</span></div>
+            </div>
+            <p class="tile__label">GPU-Temperatur</p><p class="tile__sub muted">—</p>
+          </div>
+        </div>
+
+        <div class="grid grid--3">
+          <div class="card glass">
+            <div class="card__head"><h3>Arbeitsspeicher</h3><span class="value" id="ram-val">0%</span></div>
+            <div class="bar"><div class="bar__fill" id="ram-bar"></div></div>
+            <canvas id="ram-chart" class="spark"></canvas>
+            <p class="muted" id="ram-detail">—</p>
+          </div>
+          <div class="card glass">
+            <div class="card__head"><h3>Netzwerk</h3><span class="muted">live</span></div>
+            <div class="net">
+              <div><span class="net__arrow down">↓</span><span class="value value--sm" id="net-rx">0 B/s</span></div>
+              <div><span class="net__arrow up">↑</span><span class="value value--sm" id="net-tx">0 B/s</span></div>
+            </div>
+            <canvas id="net-chart" class="spark"></canvas>
+            <p class="muted" id="net-detail">—</p>
+          </div>
+          <div class="card glass">
+            <div class="card__head"><h3>CPU-Kerne</h3><span class="muted" id="cores-label">—</span></div>
+            <div class="cores" id="cores"></div>
+            <canvas id="cpu-chart" class="spark"></canvas>
+          </div>
+        </div>
+
+        <div class="grid grid--2">
+          <div class="card glass">
+            <div class="card__head"><h3>Laufwerke</h3><span class="muted" id="vol-total">—</span></div>
+            <div class="volumes" id="volumes"></div>
+          </div>
+          <div class="card glass">
+            <div class="card__head">
+              <h3>Top-Prozesse</h3>
+              <button class="link" data-goto="processes">Alle Prozesse</button>
+            </div>
+            <div class="proc-mini" id="proc-mini"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= HARDWARE ================= -->
+      <section class="view" id="view-hardware">
+        <div class="toolbar">
+          <div>
+            <h2>Hardware</h2>
+            <p class="muted">Alle verbauten Komponenten deines PCs</p>
+          </div>
+          <div class="toolbar__actions">
+            <button class="btn btn--ghost" id="btn-refresh">↻ Neu einlesen</button>
+            <button class="btn btn--ghost" id="btn-copy">Kopieren</button>
+            <button class="btn btn--primary" id="btn-export">Bericht speichern</button>
+          </div>
+        </div>
+        <div class="hw-grid" id="hw-grid">
+          <div class="card glass loading">Hardware wird erkannt… das kann beim ersten Start einige Sekunden dauern.</div>
+        </div>
+      </section>
+
+      <!-- ================= SENSOREN ================= -->
+      <section class="view" id="view-sensors">
+        <div class="toolbar">
+          <div>
+            <h2>Sensoren</h2>
+            <p class="muted">Temperaturen, Lüfter, Takt und Leistung</p>
+          </div>
+          <span class="chip" id="lhm-chip">Sensor-Dienst wird geprüft</span>
+        </div>
+
+        <div class="card glass setup hidden" id="sensor-setup">
+          <div class="setup__text">
+            <h3 id="setup-title">CPU-Temperatur freischalten</h3>
+            <p class="muted" id="setup-desc">Windows gibt Temperaturen nur an Programme mit eigenem Treiber heraus. Nebula richtet dafür einmalig den kostenlosen Sensor-Dienst LibreHardwareMonitor ein und startet ihn danach automatisch mit Windows. Du bestätigst nur einmal die Windows-Abfrage.</p>
+            <p class="setup__progress hidden" id="setup-progress"><span class="spinner"></span><span id="setup-progress-text"></span></p>
+          </div>
+          <button class="btn btn--primary" id="btn-setup">Sensoren einrichten</button>
+        </div>
+
+        <div class="card glass">
+          <h3>Datenquellen</h3>
+          <ul class="sources" id="sources"></ul>
+        </div>
+
+        <div class="grid grid--2" id="sensor-summary"></div>
+        <div class="sensor-groups" id="sensor-groups"></div>
+      </section>
+
+      <!-- ================= PROZESSE ================= -->
+      <section class="view" id="view-processes">
+        <div class="toolbar">
+          <div>
+            <h2>Prozesse</h2>
+            <p class="muted" id="proc-sub">Gruppiert nach Programm</p>
+          </div>
+          <div class="segmented" id="proc-sort">
+            <button class="active" data-sort="cpu">CPU</button>
+            <button data-sort="mem">RAM</button>
+          </div>
+        </div>
+        <div class="card glass">
+          <table class="table">
+            <thead><tr><th>Programm</th><th class="num">Instanzen</th><th class="num">CPU</th><th class="num">RAM</th><th></th></tr></thead>
+            <tbody id="proc-table"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================= NOTIZEN ================= -->
+      <section class="view" id="view-notes">
+        <div class="card glass notes">
+          <div class="card__head"><h3>Notizen</h3><span class="muted" id="notes-status">Gespeichert</span></div>
+          <textarea id="notes" spellcheck="true" placeholder="Schreib hier los… wird automatisch gespeichert."></textarea>
+          <div class="notes__foot muted"><span id="notes-count">0 Zeichen</span></div>
+        </div>
+      </section>
+
+      <!-- ================= EINSTELLUNGEN ================= -->
+      <section class="view" id="view-settings">
+        <div class="card glass settings">
+          <h3>Einstellungen</h3>
+          <div class="setting">
+            <div><strong>Wärmebild-Palette</strong><p class="muted">Farben von Hintergrund und Anzeigen, wie bei einer Wärmebildkamera</p></div>
+            <div class="swatches" id="swatches"></div>
+          </div>
+          <div class="setting">
+            <div><strong>Immer im Vordergrund</strong><p class="muted">Fenster bleibt über anderen Apps</p></div>
+            <label class="switch"><input type="checkbox" id="s-top" /><span></span></label>
+          </div>
+          <div class="setting">
+            <div><strong>In Tray minimieren</strong><p class="muted">Schließen versteckt die App nur</p></div>
+            <label class="switch"><input type="checkbox" id="s-tray" /><span></span></label>
+          </div>
+          <div class="setting">
+            <div><strong>Mit Windows starten</strong><p class="muted">Automatisch beim Anmelden öffnen</p></div>
+            <label class="switch"><input type="checkbox" id="s-auto" /><span></span></label>
+          </div>
+          <div class="setting">
+            <div><strong>Sensor-Dienst-Port</strong><p class="muted">Port von LibreHardwareMonitor (Standard 8085)</p></div>
+            <input class="input" id="s-port" type="number" min="1" max="65535" />
+          </div>
+          <div class="setting">
+            <div><strong>Sensor-Dienst entfernen</strong><p class="muted">Beendet LibreHardwareMonitor und löscht den Autostart</p></div>
+            <button class="btn btn--ghost btn--small" id="btn-remove-sensors">Entfernen</button>
+          </div>
+          <p class="muted version" id="version"></p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="background.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
