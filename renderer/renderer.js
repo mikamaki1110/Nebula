@@ -20,8 +20,18 @@ let settings = {};
 let hw = null;          // statische Hardware-Infos
 let slow = null;        // letzte langsame Live-Werte
 let procs = null;       // letzte Prozessliste
+let fast = null;        // letzte schnelle Live-Werte
 let sensorStatus = null; // Status des Sensor-Dienstes
-let procSort = "cpu";
+
+// Verlauf für die großen Diagramme der Detailseiten (ca. 2–4 Minuten)
+const HIST_FAST = 90;
+const HIST_SLOW = 60;
+const hist = { cpu: [], ram: [], netRx: [], netTx: [], cpuTemp: [], gpuLoad: [], gpuTemp: [] };
+function pushHist(key, value, size) {
+  const arr = hist[key];
+  arr.push(value ?? null);
+  if (arr.length > size) arr.shift();
+}
 
 // =====================================================================
 // Helfer
@@ -74,6 +84,37 @@ function toast(msg) {
   toast.timer = setTimeout(() => t.classList.remove("show"), 2000);
 }
 
+// Bestätigungsdialog im Nebula-Stil (ersetzt window.confirm)
+function confirmDialog({ title, text, ok = "OK", danger = false }) {
+  return new Promise((resolve) => {
+    const modal = $("modal");
+    $("modal-title").textContent = title;
+    $("modal-text").textContent = text;
+    const okBtn = $("modal-ok");
+    okBtn.textContent = ok;
+    okBtn.className = `btn ${danger ? "btn--danger" : "btn--primary"}`;
+    modal.classList.remove("hidden");
+    okBtn.focus();
+
+    const close = (result) => {
+      modal.classList.add("hidden");
+      okBtn.onclick = null;
+      $("modal-cancel").onclick = null;
+      modal.onclick = null;
+      document.removeEventListener("keydown", onKey, true);
+      resolve(result);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(false); }
+      if (e.key === "Enter") { e.preventDefault(); close(true); }
+    };
+    okBtn.onclick = () => close(true);
+    $("modal-cancel").onclick = () => close(false);
+    modal.onclick = (e) => { if (e.target === modal) close(false); };
+    document.addEventListener("keydown", onKey, true);
+  });
+}
+
 function applyTheme(index) {
   const theme = THEMES[index] ?? THEMES[0];
   const root = document.documentElement.style;
@@ -98,43 +139,90 @@ function setTile(id, pct, value, sub, state) {
 // Sparkline-Charts (1 oder 2 Linien)
 // =====================================================================
 class Sparkline {
-  constructor(canvas, { series = 1, size = 48, max = 100 } = {}) {
+  // series: Anzahl Linien · max: feste Obergrenze (null = automatisch)
+  // grid: Hilfslinien mit Beschriftung · format: Beschriftung der Hilfslinien
+  constructor(canvas, { series = 1, size = 48, max = 100, grid = false, format = (v) => `${Math.round(v)}` } = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
-    this.max = max; // null = automatisch
-    this.data = Array.from({ length: series }, () => new Array(size).fill(0));
+    this.max = max;
+    this.grid = grid;
+    this.format = format;
+    this.size = size;
+    this.data = Array.from({ length: series }, () => new Array(size).fill(null));
+  }
+
+  // Mit vorhandenem Verlauf füllen (z. B. beim Öffnen einer Detailseite)
+  seed(...arrays) {
+    arrays.forEach((arr, i) => {
+      const tail = arr.slice(-this.size);
+      this.data[i] = new Array(this.size - tail.length).fill(null).concat(tail);
+    });
+    this.started = arrays.some((a) => a.length);
+    this.draw();
   }
 
   push(...values) {
     // Beim ersten Wert die ganze Linie damit füllen, statt bei 0 zu starten
-    if (!this.started) { this.started = true; values.forEach((v, i) => this.data[i].fill(v || 0)); }
-    values.forEach((v, i) => { this.data[i].push(v || 0); this.data[i].shift(); });
+    if (!this.started) { this.started = true; values.forEach((v, i) => this.data[i].fill(v ?? null)); }
+    values.forEach((v, i) => { this.data[i].push(v ?? null); this.data[i].shift(); });
     this.draw();
   }
 
   draw() {
     const { canvas, ctx } = this;
+    if (!canvas.isConnected) return;
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     if (!w || !h) return;
-    if (canvas.width !== Math.round(w * dpr)) { canvas.width = w * dpr; canvas.height = h * dpr; }
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
     const css = getComputedStyle(document.documentElement);
     const colors = [css.getPropertyValue("--accent").trim(), css.getPropertyValue("--accent-2").trim()];
-    const max = this.max ?? Math.max(1, ...this.data.flat()) * 1.15;
+    const values = this.data.flat().filter((v) => v != null);
+    const max = this.max ?? Math.max(1, ...values) * 1.15;
+    // Platz rechts für die Beschriftung der Hilfslinien (abhängig von der Textbreite)
+    let padR = 0;
+    if (this.grid) {
+      ctx.font = `11px ${css.getPropertyValue("--font")}`;
+      padR = 14 + Math.max(...[0.25, 0.5, 0.75, 1].map((f) => ctx.measureText(this.format(max * f)).width));
+    }
+    const plotW = w - padR;
     const y = (v) => h - 3 - (v / max) * (h - 6);
 
+    if (this.grid) {
+      ctx.font = `11px ${css.getPropertyValue("--font")}`;
+      ctx.textBaseline = "middle";
+      [0.25, 0.5, 0.75, 1].forEach((f) => {
+        const yy = Math.round(y(max * f)) + 0.5;
+        ctx.strokeStyle = "rgba(232,238,245,0.07)";
+        ctx.setLineDash([3, 4]);
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(plotW, yy); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(140,152,171,0.85)";
+        ctx.fillText(this.format(max * f), plotW + 8, yy);
+      });
+    }
+
     this.data.forEach((series, si) => {
-      const step = w / (series.length - 1);
+      const step = plotW / (series.length - 1);
       const color = this.data.length === 1 ? colors[0] : colors[si % 2];
+      const first = series.findIndex((v) => v != null);
+      if (first < 0) return;
       ctx.beginPath();
-      series.forEach((v, i) => (i ? ctx.lineTo(i * step, y(v)) : ctx.moveTo(0, y(v))));
+      series.forEach((v, i) => {
+        if (v == null) return;
+        i === first ? ctx.moveTo(i * step, y(v)) : ctx.lineTo(i * step, y(v));
+      });
 
       if (this.data.length === 1) {
-        const g = ctx.createLinearGradient(0, 0, w, 0);
+        const g = ctx.createLinearGradient(0, 0, plotW, 0);
         g.addColorStop(0, colors[0]);
         g.addColorStop(1, colors[1]);
         ctx.strokeStyle = g;
@@ -147,8 +235,8 @@ class Sparkline {
       ctx.shadowBlur = 8;
       ctx.stroke();
 
-      ctx.lineTo(w, h);
-      ctx.lineTo(0, h);
+      ctx.lineTo((series.length - 1) * step, h);
+      ctx.lineTo(first * step, h);
       ctx.closePath();
       const fill = ctx.createLinearGradient(0, 0, 0, h);
       fill.addColorStop(0, color + "40");
@@ -162,10 +250,11 @@ class Sparkline {
 
 const charts = {
   cpu: new Sparkline($("cpu-chart")),
-  ram: new Sparkline($("ram-chart")),
   net: new Sparkline($("net-chart"), { series: 2, max: null }),
 };
-const redrawCharts = () => Object.values(charts).forEach((c) => c.draw());
+// Detailseiten melden ihre Diagramme hier an, damit sie bei Farbwechsel/Größenänderung neu zeichnen
+const extraCharts = new Set();
+const redrawCharts = () => [...Object.values(charts), ...extraCharts].forEach((c) => c.draw());
 window.addEventListener("resize", redrawCharts);
 
 // =====================================================================
@@ -175,14 +264,26 @@ $("wc-min").addEventListener("click", api.window.minimize);
 $("wc-max").addEventListener("click", api.window.maximize);
 $("wc-close").addEventListener("click", api.window.close);
 
+let currentView = "dashboard";
 function showView(name) {
-  document.querySelectorAll(".nav").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  currentView = name;
+  const navName = name === "detail" ? "dashboard" : name;
+  document.querySelectorAll(".nav").forEach((b) => b.classList.toggle("active", b.dataset.view === navName));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
+  document.querySelector(".content").scrollTop = 0;
+  if (name !== "detail") window.Details?.close();
   if (name === "notes") $("notes").focus();
-  if (name === "dashboard") requestAnimationFrame(redrawCharts);
+  if (name === "processes") $("proc-search").focus();
+  requestAnimationFrame(redrawCharts);
 }
 document.querySelectorAll(".nav").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
-document.querySelectorAll("[data-goto]").forEach((b) => b.addEventListener("click", () => showView(b.dataset.goto)));
+// Klicks auf alles mit data-goto (Ansicht) oder data-detail (Detailseite)
+document.addEventListener("click", (e) => {
+  const target = e.target.closest("[data-goto], [data-detail]");
+  if (!target || target.closest("#modal")) return;
+  if (target.dataset.goto) showView(target.dataset.goto);
+  else if (target.dataset.detail) window.Details?.open(target.dataset.detail);
+});
 
 function tickClock() {
   const now = new Date();
@@ -214,14 +315,11 @@ async function updateFast() {
   fastBusy = true;
   try {
     const f = await api.hw.fast();
+    fast = f;
 
-    $("t-cpu").dataset.kind = "load";
     setTile("t-cpu", f.cpu, `${f.cpu}%`, f.cpuSpeed ? `${f.cpuSpeed.toFixed(2)} GHz` : hw?.cpu?.name ?? "");
-
-    $("ram-val").textContent = `${f.ramPercent}%`;
-    $("ram-bar").style.width = `${f.ramPercent}%`;
-    $("ram-bar").classList.toggle("warn", f.ramPercent >= 85);
-    $("ram-detail").textContent = `${fmtBytes(f.ramUsed)} von ${fmtBytes(f.ramTotal)} belegt`;
+    setTile("t-ram", f.ramPercent, `${f.ramPercent}%`, `${fmtBytes(f.ramUsed)} von ${fmtBytes(f.ramTotal)}`, f.ramPercent >= 90 ? "hot" : "");
+    $("t-ram").querySelector(".temp-pill").textContent = `${fmtBytes(f.ramTotal - f.ramUsed)} frei`;
 
     $("net-rx").textContent = fmtRate(f.netRx);
     $("net-tx").textContent = fmtRate(f.netTx);
@@ -239,8 +337,12 @@ async function updateFast() {
     // Ohne Temperatursensor folgt die Hitze des Hintergrunds der CPU-Last
     if (slow && slow.cpuTemp == null && !slow.gpus[0]?.temp) window.NebulaBG?.setHeat(f.cpu / 100);
     charts.cpu.push(f.cpu);
-    charts.ram.push(f.ramPercent);
     charts.net.push(f.netRx, f.netTx);
+    pushHist("cpu", f.cpu, HIST_FAST);
+    pushHist("ram", f.ramPercent, HIST_FAST);
+    pushHist("netRx", f.netRx, HIST_FAST);
+    pushHist("netTx", f.netTx, HIST_FAST);
+    window.Details?.onFast(f);
   } catch (err) {
     console.error(err);
   } finally {
@@ -258,9 +360,13 @@ async function updateSlow() {
   slowBusy = true;
   try {
     slow = await api.hw.slow();
+    pushHist("cpuTemp", slow.cpuTemp, HIST_SLOW);
+    pushHist("gpuTemp", slow.gpus[0]?.temp ?? null, HIST_SLOW);
+    pushHist("gpuLoad", slow.gpus[0]?.load ?? null, HIST_SLOW);
     renderTemps();
-    renderVolumes();
+    renderDiskTile();
     renderSensors();
+    window.Details?.onSlow(slow);
   } catch (err) {
     console.error(err);
   } finally {
@@ -268,21 +374,24 @@ async function updateSlow() {
   }
 }
 
+function setPill(tileId, temp) {
+  const pill = $(tileId).querySelector(".temp-pill");
+  pill.dataset.state = tempState(temp);
+  pill.textContent = temp == null ? "Temperatur fehlt" : `${Math.round(temp)} °C`;
+}
+
 function renderTemps() {
   const ct = slow.cpuTemp;
-  const tempNum = (t) => (t == null ? "—" : String(Math.round(t)));
-  setTile("t-cputemp", ct ?? 0, tempNum(ct), ct != null ? `Gemessen mit ${slow.cpuTempSource}` : "Nicht verfügbar", tempState(ct));
+  setPill("t-cpu", ct);
 
   const g = slow.gpus[0];
-  $("t-gpu").dataset.kind = "load";
   if (g) {
     const vram = g.memUsed != null && g.memTotal ? `VRAM ${Math.round((g.memUsed / g.memTotal) * 100)} % belegt` : g.model;
     setTile("t-gpu", g.load ?? 0, g.load != null ? `${g.load}%` : "—", vram, g.load == null ? "na" : "");
-    const extra = g.hotspot != null ? `Hotspot ${Math.round(g.hotspot)} °C` : g.power != null ? `${Math.round(g.power)} W Leistung` : g.model;
-    setTile("t-gputemp", g.temp ?? 0, tempNum(g.temp), g.temp != null ? extra : "Nicht verfügbar", tempState(g.temp));
+    setPill("t-gpu", g.temp);
   } else {
     setTile("t-gpu", 0, "—", "Keine GPU erkannt", "na");
-    setTile("t-gputemp", 0, "—", "Keine GPU erkannt", "na");
+    setPill("t-gpu", null);
   }
 
   renderStatus(ct, g?.temp ?? null);
@@ -315,35 +424,27 @@ function renderStatus(cpuT, gpuT) {
   window.NebulaBG?.setHeat((t - 35) / 55);
 }
 
-function renderVolumes() {
-  const box = $("volumes");
-  box.replaceChildren();
-  let total = 0;
-  let used = 0;
-  slow.volumes.forEach((v) => {
-    total += v.size;
-    used += v.used;
-    const wrap = el("div", "volume");
-    const head = el("div", "volume__head");
-    head.append(el("span", null, `${v.mount}  ${v.type ?? ""}`), el("span", null, `${fmtBytes(v.used)} / ${fmtBytes(v.size)}`));
-    const bar = el("div", "bar bar--thin");
-    const fill = el("div", "bar__fill" + (v.use >= 90 ? " warn" : ""));
-    fill.style.width = `${v.use}%`;
-    bar.append(fill);
-    wrap.append(head, bar);
-    box.append(wrap);
-  });
-  $("vol-total").textContent = total ? `${fmtBytes(total - used)} frei` : "—";
+// Systemlaufwerk (meist C:) als Kachel
+function systemVolume() {
+  const vols = slow?.volumes ?? [];
+  return vols.find((v) => /^c:?$/i.test(v.mount)) ?? vols.find((v) => v.mount === "/") ?? vols[0];
 }
 
-// ---------- Prozesse (eigene Schleife, damit Temperaturen nicht warten) ----------
+function renderDiskTile() {
+  const v = systemVolume();
+  if (!v) { setTile("t-disk", 0, "—", "Kein Laufwerk erkannt", "na"); return; }
+  setTile("t-disk", v.use, `${Math.round(v.use)}%`, `${v.mount}, ${fmtBytes(v.size)} gesamt`, v.use >= 90 ? "hot" : "");
+  $("t-disk").querySelector(".temp-pill").textContent = `${fmtBytes(v.size - v.used)} frei`;
+}
+
+// ---------- Prozesse (eigene Schleife, Darstellung in processes.js) ----------
 let procsBusy = false;
 async function updateProcs() {
   if (procsBusy) return;
   procsBusy = true;
   try {
     procs = await api.hw.procs();
-    renderProcesses();
+    window.Processes?.render();
     $("side-procs").textContent = procs.processCount || "—";
     if (slow) renderSources();
   } catch (err) {
@@ -352,61 +453,6 @@ async function updateProcs() {
     procsBusy = false;
   }
 }
-
-function sortedProcs() {
-  const list = [...(procs?.processes ?? [])];
-  return procSort === "mem" ? list.sort((a, b) => b.mem - a.mem) : list.sort((a, b) => b.cpu - a.cpu || b.mem - a.mem);
-}
-
-function renderProcesses() {
-  // Dashboard: Top 6
-  const mini = $("proc-mini");
-  mini.replaceChildren();
-  const top = [...(procs?.processes ?? [])].sort((a, b) => b.cpu - a.cpu || b.mem - a.mem).slice(0, 6);
-  if (!top.length) mini.append(el("p", "muted", "Prozesse werden gelesen…"));
-  top.forEach((p) => {
-    const row = el("div", "proc-mini__row");
-    row.append(el("span", null, p.name), el("span", null, `${p.cpu.toFixed(1)}%`), el("span", null, fmtBytes(p.mem)));
-    mini.append(row);
-  });
-
-  // Prozess-Ansicht
-  const tbody = $("proc-table");
-  tbody.replaceChildren();
-  const list = sortedProcs().slice(0, 25);
-  const maxMem = Math.max(1, ...list.map((p) => p.mem));
-  const maxCpu = Math.max(0.1, ...list.map((p) => p.cpu));
-  list.forEach((p) => {
-    const tr = el("tr");
-    const share = procSort === "mem" ? (p.mem / maxMem) * 100 : (p.cpu / maxCpu) * 100;
-    const bar = el("div", "bar bar--thin");
-    const fill = el("div", "bar__fill");
-    fill.style.width = `${share}%`;
-    bar.append(fill);
-    const barTd = el("td", "barcell");
-    barTd.append(bar);
-    tr.append(el("td", null, p.name), el("td", "num", p.count), el("td", "num", `${p.cpu.toFixed(1)}%`), el("td", "num", fmtBytes(p.mem)), barTd);
-    tbody.append(tr);
-  });
-  if (!list.length) {
-    const tr = el("tr");
-    const td = el("td", "muted", procs ? "Keine Prozessdaten erhalten. Details unter Sensoren → Datenquellen." : "Prozesse werden gelesen…");
-    td.colSpan = 5;
-    tr.append(td);
-    tbody.append(tr);
-  }
-  $("proc-sub").textContent = procs?.processCount
-    ? `${procs.processCount} laufende Prozesse, gleiche Programme zusammengefasst`
-    : "Prozesse werden gelesen…";
-}
-
-document.querySelectorAll("#proc-sort button").forEach((b) =>
-  b.addEventListener("click", () => {
-    procSort = b.dataset.sort;
-    document.querySelectorAll("#proc-sort button").forEach((x) => x.classList.toggle("active", x === b));
-    if (procs) renderProcesses();
-  })
-);
 
 // =====================================================================
 // Sensoren
@@ -458,6 +504,14 @@ function renderSetupCard() {
     $("setup-title").textContent = "Nur unter Windows verfügbar";
     $("setup-desc").textContent = "Die automatische Sensor-Einrichtung funktioniert nur unter Windows.";
     btn.classList.add("hidden");
+  } else if (sensorStatus.bundled) {
+    // Mit Nebula installiert, antwortet aber nicht
+    $("setup-title").textContent = sensorStatus.running ? "Sensor-Dienst startet noch" : "Sensor-Dienst läuft nicht";
+    $("setup-desc").textContent = sensorStatus.running
+      ? "Der Sensor-Dienst wurde mit Nebula installiert und fährt gerade hoch. Das dauert nach dem Windows-Start manchmal eine Minute."
+      : "Der Sensor-Dienst wurde mit Nebula installiert, läuft aber gerade nicht. Mit „Reparieren“ richtet Nebula ihn neu ein.";
+    btn.textContent = "Reparieren";
+    btn.dataset.action = "setup";
   } else if (sensorStatus.installed) {
     $("setup-title").textContent = "Sensor-Dienst ist nicht gestartet";
     $("setup-desc").textContent = sensorStatus.task
@@ -578,7 +632,13 @@ function renderSensors() {
 }
 
 $("btn-remove-sensors").addEventListener("click", async () => {
-  if (!confirm("Sensor-Dienst wirklich entfernen? Temperaturen sind danach nicht mehr verfügbar.")) return;
+  const ok = await confirmDialog({
+    title: "Sensor-Dienst entfernen?",
+    text: "CPU- und GPU-Temperaturen sind danach nicht mehr verfügbar. Du kannst ihn unter Sensoren jederzeit wieder einrichten.",
+    ok: "Entfernen",
+    danger: true,
+  });
+  if (!ok) return;
   const result = await api.sensors.remove();
   toast(result.ok ? "Sensor-Dienst entfernt" : result.error);
   refreshSensorStatus();
@@ -722,7 +782,7 @@ function renderHardware() {
 
   // Akku (nur Laptops)
   if (i.battery) {
-    const bat = hwCard("▮", "Akku", slow?.battery ? `${slow.battery.percent}%${slow.battery.charging ? " · lädt" : ""}` : "—");
+    const bat = hwCard("▮", "Akku", slow?.battery ? `${slow.battery.percent}%${slow.battery.charging ? ", lädt" : ""}` : "—");
     bat.append(infoList([
       ["Hersteller", i.battery.manufacturer],
       ["Modell", i.battery.model],
@@ -863,4 +923,5 @@ async function init() {
   setInterval(refreshSensorStatus, 20000);
 }
 
-init();
+// Erst starten, wenn auch processes.js und details.js geladen sind
+window.addEventListener("DOMContentLoaded", init);

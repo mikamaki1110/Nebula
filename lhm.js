@@ -23,6 +23,16 @@ const DOWNLOAD_URLS = [
 
 const isWindows = process.platform === "win32";
 const baseDir = () => path.join(app.getPath("userData"), "LibreHardwareMonitor");
+// Mit der Setup-EXE mitgelieferte Dateien (siehe build/fetch-sensors.ps1)
+const resources = () => (app.isPackaged ? process.resourcesPath : path.join(__dirname, "vendor"));
+const bundledLhmDir = () => path.join(resources(), "lhm");
+const bundledPawnIo = () => path.join(resources(), "PawnIO_setup.exe");
+const bundledScript = (name) => path.join(process.resourcesPath, "sensors", name);
+// Installierte Version (nicht portable): Der Installer hat den Dienst bereits eingerichtet
+const isInstalledBuild = () =>
+  app.isPackaged && fs.existsSync(path.join(path.dirname(process.execPath), `Uninstall ${app.getName()}.exe`)) &&
+  fs.existsSync(path.join(bundledLhmDir(), "LibreHardwareMonitor.exe"));
+
 // Merker, dass die geplante Aufgabe erfolgreich angelegt wurde
 const markerFile = () => path.join(baseDir(), "nebula-task.json");
 const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
@@ -68,7 +78,7 @@ async function powershellElevated(scriptBody) {
     await powershell(outer, 180000);
   } catch (err) {
     if (err.code === 1223 || /UAC_CANCELLED/.test(err.message)) {
-      throw new Error("Die Admin-Abfrage wurde abgebrochen. Ohne Admin-Rechte kann Windows keine Temperaturen freigeben.");
+      throw new Error("Die Windows-Abfrage für Admin-Rechte wurde abgebrochen.");
     }
     if (fs.existsSync(log)) {
       const detail = fs.readFileSync(log, "utf8").replace(/^\uFEFF/, "").split(/\r?\n/).find((l) => l.trim()) ?? "";
@@ -125,6 +135,7 @@ function writeConfig(exe, port) {
     for (const m of xml.matchAll(/<add\s+key="([^"]*)"\s+value="([^"]*)"\s*\/>/g)) settings.set(m[1], m[2]);
   }
   settings.set("runWebServerMenuItem", "true");
+  settings.set("listenerIp", "127.0.0.1");   // nur auf diesem PC erreichbar, keine Firewall-Abfrage
   settings.set("listenerPort", String(port));
   settings.set("startMinMenuItem", "true");
   settings.set("minTrayMenuItem", "true");
@@ -157,6 +168,9 @@ async function download(dest) {
 // Öffentliche Funktionen
 // =====================================================================
 async function status() {
+  if (isWindows && isInstalledBuild()) {
+    return { supported: true, installed: true, bundled: true, task: true, running: await isProcessRunning() };
+  }
   const exe = findExe(baseDir());
   return {
     supported: isWindows,
@@ -171,8 +185,24 @@ async function setup(port, progress) {
   const dir = baseDir();
   fs.mkdirSync(dir, { recursive: true });
 
-  // 1. Herunterladen
+  // Installierte Version: Dienst mit den mitgelieferten Dateien neu einrichten (Reparatur)
+  if (isInstalledBuild()) {
+    progress("task", "Bitte die Windows-Abfrage mit „Ja“ bestätigen…");
+    await powershellElevated(`
+Start-Process -FilePath ${psQuote(bundledPawnIo())} -ArgumentList '-install','-silent' -Wait
+& ${psQuote(bundledScript("install-sensors.ps1"))} -LhmDir ${psQuote(bundledLhmDir())}
+`);
+    progress("wait", "Sensoren starten…");
+    return;
+  }
+
+  // 1. Mitgelieferte Dateien nutzen (portable Version), sonst herunterladen
   let exe = findExe(dir);
+  if (!exe && fs.existsSync(path.join(bundledLhmDir(), "LibreHardwareMonitor.exe"))) {
+    progress("extract", "Sensor-Dienst wird vorbereitet…");
+    fs.cpSync(bundledLhmDir(), path.join(dir, "LHM"), { recursive: true });
+    exe = findExe(dir);
+  }
   if (!exe) {
     progress("download", "LibreHardwareMonitor wird heruntergeladen…");
     const zip = path.join(dir, "LibreHardwareMonitor.zip");
@@ -192,7 +222,11 @@ async function setup(port, progress) {
   // 3. Geplante Aufgabe mit Admin-Rechten + sofort starten (eine UAC-Abfrage)
   progress("task", "Bitte die Windows-Abfrage mit „Ja“ bestätigen…");
   const user = `${process.env.USERDOMAIN || os.hostname()}\\${os.userInfo().username}`;
-  await powershellElevated(`
+  // Treiber still mitinstallieren, falls er mitgeliefert wurde (sonst fragt LHM beim ersten Start danach)
+  const pawnIo = fs.existsSync(bundledPawnIo())
+    ? `Start-Process -FilePath ${psQuote(bundledPawnIo())} -ArgumentList '-install','-silent' -Wait\n`
+    : "";
+  await powershellElevated(`${pawnIo}
 Get-Process -Name LibreHardwareMonitor -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 $action    = New-ScheduledTaskAction -Execute ${psQuote(exe)} -WorkingDirectory ${psQuote(path.dirname(exe))}
@@ -228,6 +262,11 @@ async function start() {
 
 async function remove() {
   if (!isWindows) return;
+  if (isInstalledBuild()) {
+    // Dateien bleiben im Programmordner, nur Dienst und Autostart werden entfernt
+    await powershellElevated(`& ${psQuote(bundledScript("uninstall-sensors.ps1"))}`);
+    return;
+  }
   await powershellElevated(`
 Get-Process -Name LibreHardwareMonitor -ErrorAction SilentlyContinue | Stop-Process -Force
 Unregister-ScheduledTask -TaskName ${psQuote(TASK_NAME)} -Confirm:$false -ErrorAction SilentlyContinue
@@ -242,6 +281,7 @@ async function ensureRunning() {
     // Nur über die geplante Aufgabe starten, damit beim Programmstart keine UAC-Abfrage erscheint
     const s = await status();
     if (s.installed && s.task && !s.running) {
+      // installierte Version: Aufgabe läuft als SYSTEM, Benutzer dürfen sie starten (siehe install-sensors.ps1)
       await powershell(`Start-ScheduledTask -TaskName ${psQuote(TASK_NAME)}`, 20000);
     }
   } catch {
@@ -249,4 +289,4 @@ async function ensureRunning() {
   }
 }
 
-module.exports = { status, setup, start, remove, ensureRunning, writeConfig, findExe, powershell };
+module.exports = { status, setup, start, remove, ensureRunning, writeConfig, findExe, powershell, powershellElevated };

@@ -1,4 +1,4 @@
-# Nebula Desktop 1.3 – Anleitung
+# Nebula Desktop 1.4 – Anleitung
 
 ## Öffentlich veröffentlichen (GitHub baut die EXE für dich)
 Einmalig einrichten:
@@ -11,7 +11,7 @@ Einmalig einrichten:
 
 Version veröffentlichen:
 1. Auf github.com im Repository → **Actions** → **Nebula veröffentlichen** → **Run workflow**
-2. Nach ca. 5–10 Minuten liegt unter **Releases** die `Nebula-Setup-1.3.0.exe`
+2. Nach ca. 5–10 Minuten liegt unter **Releases** die `Nebula-Setup-1.4.0.exe`
 3. Diesen Link teilst du: `https://github.com/DEIN-NAME/nebula/releases/latest`
 
 Neue Version: in `package.json` die `version` erhöhen (z. B. 1.4.0), pushen, Workflow starten.
@@ -19,8 +19,8 @@ Alle Nutzer bekommen das Update automatisch.
 
 ## EXE lokal bauen (nur zum Testen)
 Doppelklick auf `EXE-BAUEN.bat` → danach öffnet sich der Ordner `dist` mit:
-- `Nebula-Setup-1.3.0.exe` (Installer mit Desktop- und Startmenü-Verknüpfung)
-- `Nebula-Portable-1.3.0.exe` (portable Version, ohne Installation startbar)
+- `Nebula-Setup-1.4.0.exe` (Installer mit Desktop- und Startmenü-Verknüpfung)
+- `Nebula-Portable-1.4.0.exe` (portable Version, ohne Installation startbar)
 
 ## Zum Entwickeln starten
 1. Terminal im Ordner `nebula-desktop` öffnen
@@ -28,28 +28,21 @@ Doppelklick auf `EXE-BAUEN.bat` → danach öffnet sich der Ordner `dist` mit:
 3. `npm start`
 
 ## Funktionen
-- Dashboard: CPU-/GPU-Auslastung und -Temperatur, RAM, Netzwerk, alle CPU-Threads, Laufwerke, Top-Prozesse
+- Übersicht: CPU, GPU, RAM, Systemlaufwerk, Netzwerk, Threads, Top-Prozesse – alles anklickbar
+- Detailseiten: Prozessor (jeder Kern), Grafikkarte, Arbeitsspeicher, Laufwerke, Netzwerk
 - Hardware: Prozessor, Grafikkarte, RAM-Riegel, Mainboard, BIOS, Windows, Bildschirme, Laufwerke (inkl. SMART), Netzwerk
 - Sensoren: alle Temperaturen, Lüfter, Takte und Leistungswerte
-- Prozesse: nach CPU oder RAM sortiert, gruppiert nach Programm
+- Prozesse: Apps/Hintergrund, Suche, Sortierung per Klick auf die Spalte, aufklappen, Task beenden (Entf-Taste)
 - Systembericht kopieren oder als .txt speichern
 - Notizen, Akzentfarben, Tray-Icon, Autostart, Strg + Shift + N
 
-## CPU- und GPU-Temperaturen freischalten (einmalig)
-Windows gibt Temperaturen nur an Programme mit eigenem Treiber heraus. Nebula erledigt das selbst:
-1. Nebula öffnen → **Sensoren** → **Sensoren einrichten**
-2. Die Windows-Abfrage („Möchten Sie zulassen…“) mit **Ja** bestätigen
-3. Beim allerersten Start fragt LibreHardwareMonitor nach dem Treiber **PawnIO** → **OK** klicken
+## CPU- und GPU-Temperaturen
+Funktionieren direkt nach der Installation. Der Installer richtet automatisch ein:
+- den Sensor-Treiber PawnIO (still, ohne Fenster)
+- LibreHardwareMonitor als unsichtbaren Hintergrunddienst (Aufgabe „Nebula Sensoren“, läuft als SYSTEM)
 
-Danach startet der Sensor-Dienst automatisch mit Windows, ohne weitere Abfragen.
-Unter **Sensoren → Datenquellen** siehst du jederzeit, welcher Wert woher kommt.
-
-Was ohne Einrichtung schon funktioniert:
-- Prozesse (wie im Task-Manager)
-- GPU-Auslastung (alle Hersteller)
-- GPU-Temperatur bei NVIDIA-Grafikkarten
-
-Entfernen: Einstellungen → Sensor-Dienst entfernen.
+Falls die Temperaturen einmal fehlen: Sensoren → „Reparieren“.
+Portable Version: Sensoren → „Sensoren einrichten“ (einmalig, eine Windows-Abfrage).
 
 ## Design
 - Hintergrund: Isothermen wie auf einer Wärmebildkamera. Sie werden mit der CPU-Temperatur wärmer

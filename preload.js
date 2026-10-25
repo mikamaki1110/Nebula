@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("nebula", {
     fast: () => ipcRenderer.invoke("hw:fast"),
     slow: () => ipcRenderer.invoke("hw:slow"),
     procs: () => ipcRenderer.invoke("hw:procs"),
+    kill: (pids, elevated = false) => ipcRenderer.invoke("proc:kill", pids, elevated),
   },
   sensors: {
     test: () => ipcRenderer.invoke("lhm:test"),

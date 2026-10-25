@@ -18,12 +18,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo  [1/2] Lade benoetigte Pakete herunter (einmalig, dauert etwas)...
+echo  [1/3] Lade benoetigte Pakete herunter (einmalig, dauert etwas)...
 call npm install --no-audit --no-fund
 if errorlevel 1 goto fehler
 
 echo.
-echo  [2/2] Baue Installer und portable EXE...
+echo  [2/3] Lade Sensor-Dienst zum Einpacken...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0build\fetch-sensors.ps1"
+if errorlevel 1 goto fehler
+
+echo.
+echo  [3/3] Baue Installer und portable EXE...
 call npm run dist
 if errorlevel 1 goto fehler
 
@@ -31,8 +36,8 @@ echo.
 echo  ===========================================
 echo   FERTIG! Der Ordner "dist" wird geoeffnet.
 echo  ===========================================
-echo   Nebula-Setup-1.3.0.exe    = Installer
-echo   Nebula-Portable-1.3.0.exe = Portable Version
+echo   Nebula-Setup-1.4.0.exe    = Installer
+echo   Nebula-Portable-1.4.0.exe = Portable Version
 echo.
 start "" "%~dp0dist"
 pause

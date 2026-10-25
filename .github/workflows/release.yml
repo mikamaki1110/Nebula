@@ -18,15 +18,19 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Code holen
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Node.js einrichten
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
 
       - name: Pakete installieren
         run: npm install --no-audit --no-fund
+
+      - name: Sensor-Dienst (LibreHardwareMonitor + PawnIO) einpacken
+        shell: pwsh
+        run: ./build/fetch-sensors.ps1
 
       - name: Setup-EXE bauen und als Release veröffentlichen
         run: >-

@@ -266,37 +266,61 @@ async function readLhm(port) {
 }
 
 // ---------- Windows-Leistungsindikatoren (ohne Admin, alle Hersteller) ----------
-// Liefert Prozesse wie im Task-Manager und die GPU-Auslastung (3D-Engine).
+// Liefert Prozesse wie im Task-Manager (mit PID), offene Fenster und die GPU-Auslastung.
 const WIN_STATS_SCRIPT = `
 $ErrorActionPreference = 'SilentlyContinue'
 $p = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process |
   Where-Object { $_.Name -ne '_Total' -and $_.Name -ne 'Idle' } |
-  Select-Object Name, PercentProcessorTime, WorkingSetPrivate
+  Select-Object Name, IDProcess, PercentProcessorTime, WorkingSetPrivate
+$w = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } |
+  Select-Object Id, MainWindowTitle, Description
 $g = (Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine |
   Where-Object { $_.Name -like '*engtype_3D*' } |
   Measure-Object -Property UtilizationPercentage -Sum).Sum
-[pscustomobject]@{ p = @($p); g = $g } | ConvertTo-Json -Compress -Depth 4
+[pscustomobject]@{ p = @($p); w = @($w); g = $g } | ConvertTo-Json -Compress -Depth 4
 `;
+
+// Diese Prozesse hält Windows am Leben – beenden würde einen Absturz/Bluescreen auslösen
+const PROTECTED = new Set([
+  "system", "registry", "smss", "csrss", "wininit", "winlogon", "services", "lsass", "lsaiso",
+  "memory compression", "secure system", "fontdrvhost", "svchost", "dwm", "sihost", "ctfmon",
+  "librehardwaremonitor", "nebula",
+]);
+// Beenden erlaubt, aber mit deutlicher Warnung
+const RISKY = new Set(["explorer", "searchhost", "startmenuexperiencehost", "shellexperiencehost", "runtimebroker"]);
 
 let winGpuLoad = null;
 let lastProcs = { processes: [], processCount: 0, source: null };
 let procsBusy = false;
 
-function groupProcesses(list) {
+function groupProcesses(list, windows) {
+  const winByPid = new Map(windows.map((w) => [Number(w.Id), w]));
   const groups = new Map();
   for (const p of list) {
     if (!p.name || /^(system idle process|idle|_total)$/i.test(p.name)) continue;
-    const key = p.name.replace(/#\d+$/, "").replace(/\.exe$/i, "");
-    const g = groups.get(key) ?? { name: key, count: 0, cpu: 0, mem: 0 };
+    const name = p.name.replace(/#\d+$/, "").replace(/\.exe$/i, "");
+    const key = name.toLowerCase();
+    const g = groups.get(key) ?? { key, name, count: 0, cpu: 0, mem: 0, instances: [], isApp: false, title: "", description: "" };
+    const win = winByPid.get(Number(p.pid));
     g.count += 1;
     g.cpu += p.cpu || 0;
     g.mem += p.mem || 0;
+    g.instances.push({ pid: Number(p.pid) || null, cpu: Math.round((p.cpu || 0) * 10) / 10, mem: p.mem || 0, title: win?.MainWindowTitle || "" });
+    if (win) {
+      g.isApp = true;
+      g.title = g.title || win.MainWindowTitle || "";
+      g.description = g.description || win.Description || "";
+    }
     groups.set(key, g);
   }
-  return [...groups.values()]
-    .map((g) => ({ ...g, cpu: Math.round(Math.min(100, g.cpu) * 10) / 10 }))
-    .sort((a, b) => b.cpu - a.cpu || b.mem - a.mem)
-    .slice(0, 60);
+  const ownPids = new Set([process.pid, ...app.getAppMetrics().map((m) => m.pid)]);
+  return [...groups.values()].map((g) => ({
+    ...g,
+    cpu: Math.round(Math.min(100, g.cpu) * 10) / 10,
+    instances: g.instances.sort((a, b) => b.cpu - a.cpu || b.mem - a.mem),
+    protected: PROTECTED.has(g.key) || g.instances.some((i) => ownPids.has(i.pid)),
+    risky: RISKY.has(g.key),
+  }));
 }
 
 async function liveProcesses() {
@@ -304,17 +328,21 @@ async function liveProcesses() {
   procsBusy = true;
   try {
     let list = [];
+    let windows = [];
     let source = null;
 
     if (process.platform === "win32") {
       try {
         const json = JSON.parse(await lhm.powershell(WIN_STATS_SCRIPT, 15000));
         const threads = os.cpus().length || 1;
-        list = (Array.isArray(json.p) ? json.p : [json.p]).filter(Boolean).map((p) => ({
+        const arr = (v) => (Array.isArray(v) ? v : [v]).filter(Boolean);
+        list = arr(json.p).map((p) => ({
           name: p.Name,
-          cpu: (Number(p.PercentProcessorTime) || 0) / threads,  // Windows zählt pro Kern
+          pid: p.IDProcess,
+          cpu: (Number(p.PercentProcessorTime) || 0) / threads, // Windows zählt pro Kern
           mem: Number(p.WorkingSetPrivate) || 0,
         }));
+        windows = arr(json.w);
         winGpuLoad = json.g != null ? Math.min(100, Math.round(Number(json.g))) : null;
         source = "Windows-Leistungsindikatoren";
       } catch (err) {
@@ -325,15 +353,48 @@ async function liveProcesses() {
     // Fallback: systeminformation
     if (!list.length) {
       const procs = await settle(si.processes(), { list: [] });
-      list = (procs.list ?? []).map((p) => ({ name: p.name, cpu: p.cpu || 0, mem: (p.memRss || 0) * 1024 }));
+      list = (procs.list ?? []).map((p) => ({ name: p.name, pid: p.pid, cpu: p.cpu || 0, mem: (p.memRss || 0) * 1024 }));
       source = list.length ? "systeminformation" : null;
     }
 
-    lastProcs = { processes: groupProcesses(list), processCount: list.length, source };
+    lastProcs = { processes: groupProcesses(list, windows), processCount: list.length, source };
     return lastProcs;
   } finally {
     procsBusy = false;
   }
+}
+
+// ---------- Prozesse beenden ----------
+function killProcesses(pids, elevated = false) {
+  const ids = [...new Set(pids.map(Number).filter((n) => Number.isInteger(n) && n > 4))];
+  // Nie Nebula selbst oder geschützte Systemprozesse beenden
+  const blocked = new Set(lastProcs.processes.filter((g) => g.protected).flatMap((g) => g.instances.map((i) => i.pid)));
+  const ownPids = new Set([process.pid, ...app.getAppMetrics().map((m) => m.pid)]);
+  const safe = ids.filter((id) => !blocked.has(id) && !ownPids.has(id));
+  if (!safe.length) return Promise.resolve({ ok: false, error: "Dieser Prozess ist geschützt und kann nicht beendet werden." });
+
+  if (elevated) {
+    return lhm
+      .powershellElevated(`Stop-Process -Id ${safe.join(",")} -Force -ErrorAction SilentlyContinue`)
+      .then(() => ({ ok: true }))
+      .catch((err) => ({ ok: false, error: err.message }));
+  }
+
+  return new Promise((resolve) => {
+    const args = safe.flatMap((id) => ["/PID", String(id)]).concat("/F");
+    require("child_process").execFile("taskkill.exe", args, { windowsHide: true }, (err, stdout, stderr) => {
+      if (!err) return resolve({ ok: true });
+      const text = `${stderr || ""}${stdout || ""}`;
+      const denied = /zugriff|verweigert|access|denied/i.test(text);
+      const gone = /nicht gefunden|not found/i.test(text);
+      if (gone && !denied) return resolve({ ok: true });
+      resolve({
+        ok: false,
+        needsAdmin: denied,
+        error: denied ? "Dieser Prozess läuft mit Admin-Rechten." : text.trim().split(/\r?\n/)[0] || "Beenden fehlgeschlagen.",
+      });
+    });
+  });
 }
 
 // ---------- Langsame Live-Werte (alle paar Sekunden) ----------
@@ -540,6 +601,11 @@ function registerIpc() {
   });
 
   ipcMain.handle("hw:procs", () => liveProcesses());
+  ipcMain.handle("proc:kill", async (_e, pids, elevated) => {
+    const result = await killProcesses(Array.isArray(pids) ? pids : [], Boolean(elevated));
+    if (result.ok) await new Promise((r) => setTimeout(r, 400));
+    return result;
+  });
 
   // ---------- Sensor-Dienst ----------
   ipcMain.handle("lhm:test", async () => Boolean(await readLhm(store.settings.lhmPort || 8085)));

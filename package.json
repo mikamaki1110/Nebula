@@ -1,14 +1,15 @@
 {
   "name": "nebula-desktop",
   "productName": "Nebula",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Hardware-Monitor für Windows: Temperaturen, Auslastung, Prozesse und alle Bauteile deines PCs",
   "main": "main.js",
   "author": "Nebula",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win"
+    "dist": "electron-builder --win",
+    "sensors": "powershell -NoProfile -ExecutionPolicy Bypass -File build/fetch-sensors.ps1"
   },
   "dependencies": {
     "electron-updater": "^6.3.0",
@@ -44,10 +45,28 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Nebula",
-      "artifactName": "Nebula-Setup-${version}.${ext}"
+      "artifactName": "Nebula-Setup-${version}.${ext}",
+      "perMachine": true
     },
     "portable": {
       "artifactName": "Nebula-Portable-${version}.${ext}"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "vendor/lhm",
+        "to": "lhm"
+      },
+      {
+        "from": "vendor/PawnIO_setup.exe",
+        "to": "PawnIO_setup.exe"
+      },
+      {
+        "from": "build/sensors",
+        "to": "sensors",
+        "filter": [
+          "*.ps1"
+        ]
+      }
+    ]
   }
 }
