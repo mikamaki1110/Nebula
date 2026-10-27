@@ -575,6 +575,184 @@ function createTray() {
 // IPC
 // =====================================================================
 function registerIpc() {
+
+  // ---------- Debug, Systemfehler & Treiber-Diagnose ----------
+  ipcMain.on("debug:toggleDevTools", () => {
+    if (win) {
+      if (win.webContents.isDevToolsOpened()) win.webContents.closeDevTools();
+      else win.webContents.openDevTools({ mode: "detach" });
+    }
+  });
+
+  ipcMain.on("debug:openDeviceManager", () => {
+    require("child_process").exec("devmgmt.msc");
+  });
+
+  ipcMain.on("debug:openWindowsUpdate", () => {
+    shell.openExternal("ms-settings:windowsupdate");
+  });
+
+  ipcMain.handle("debug:metrics", () => {
+    return {
+      mainPid: process.pid,
+      mainMemory: process.memoryUsage(),
+      appMetrics: app.getAppMetrics(),
+      cpuUsage: process.cpuUsage(),
+      versions: process.versions,
+    };
+  });
+
+  ipcMain.handle("debug:getErrors", async (_e, limit = 50) => {
+    if (process.platform !== "win32") {
+      return [{ time: new Date().toISOString(), level: "Info", provider: "Nebula", message: "Ereignis-Diagnose ist für Windows optimiert." }];
+    }
+    const psScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+$events = Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=1,2} -MaxEvents ${Math.min(100, Math.max(10, limit))} | ForEach-Object {
+    [PSCustomObject]@{
+        time = $_.TimeCreated.ToString('dd.MM.yyyy HH:mm:ss')
+        provider = $_.ProviderName
+        id = $_.Id
+        level = if ($_.LevelDisplayName) { $_.LevelDisplayName } else { if ($_.Level -eq 1) { 'Kritisch' } else { 'Fehler' } }
+        log = $_.LogName
+        message = if ($_.Message) { ($_.Message -replace '[\\r\\n]+', ' ').Trim() } else { 'Keine Detailbeschreibung' }
+    }
+}
+if ($events) { $events | ConvertTo-Json -Compress } else { '[]' }
+`;
+    try {
+      const out = await lhm.powershell(psScript, 20000);
+      const parsed = JSON.parse(out || "[]");
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch (err) {
+      return [{ time: new Date().toLocaleString("de-DE"), level: "Fehler", provider: "Nebula Log", message: `Fehler beim Auslesen: ${err.message}` }];
+    }
+  });
+
+  ipcMain.handle("debug:getDrivers", async () => {
+    if (process.platform !== "win32") {
+      return [];
+    }
+    const psScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+$drivers = Get-CimInstance Win32_PnPSignedDriver | Where-Object { $_.DeviceName -and $_.DriverVersion } | Select-Object -First 300 | ForEach-Object {
+    $dateStr = ""
+    if ($_.DriverDate) {
+        try {
+            $dateStr = ([Management.ManagementDateTimeConverter]::ToDateTime($_.DriverDate)).ToString('dd.MM.yyyy')
+        } catch { $dateStr = "" }
+    }
+    [PSCustomObject]@{
+        name = $_.DeviceName
+        manufacturer = if ($_.Manufacturer) { $_.Manufacturer } else { 'Unbekannt' }
+        version = $_.DriverVersion
+        date = $dateStr
+        signed = [bool]$_.IsSigned
+        deviceClass = if ($_.DeviceClass) { $_.DeviceClass } else { 'Gerät' }
+    }
+}
+if ($drivers) { $drivers | ConvertTo-Json -Compress } else { '[]' }
+`;
+    try {
+      const out = await lhm.powershell(psScript, 25000);
+      const parsed = JSON.parse(out || "[]");
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch (err) {
+      console.error("Fehler beim Treiber-Scan:", err);
+      return [];
+    }
+  });
+
+  ipcMain.handle("debug:checkDriverUpdates", async () => {
+    if (process.platform !== "win32") {
+      return { ok: false, error: "Nur unter Windows verfügbar." };
+    }
+    const psScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+try {
+    $session = New-Object -ComObject Microsoft.Update.Session
+    $searcher = $session.CreateUpdateSearcher()
+    $searcher.ServerSelection = 2
+    $result = $searcher.Search("IsInstalled=0 and Type='Driver'")
+    $updates = @()
+    if ($result -and $result.Updates) {
+        foreach ($u in $result.Updates) {
+            $updates += [PSCustomObject]@{
+                title = $u.Title
+                description = if ($u.Description) { ($u.Description -replace '[\\r\\n]+', ' ').Trim() } else { '' }
+                driverClass = $u.DriverClass
+                driverModel = $u.DriverModel
+                driverProvider = $u.DriverProvider
+            }
+        }
+    }
+    [PSCustomObject]@{ ok = $true; count = $updates.Count; updates = $updates } | ConvertTo-Json -Compress -Depth 3
+} catch {
+    [PSCustomObject]@{ ok = $false; error = $_.Exception.Message; updates = @() } | ConvertTo-Json -Compress
+}
+`;
+    try {
+      const out = await lhm.powershell(psScript, 60000);
+      return JSON.parse(out || '{"ok":false,"error":"Keine Rückmeldung"}');
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle("debug:installDriverUpdates", async () => {
+    if (process.platform !== "win32") {
+      return { ok: false, error: "Nur unter Windows verfügbar." };
+    }
+    const psScript = `
+$ErrorActionPreference = 'Stop'
+try {
+    $session = New-Object -ComObject Microsoft.Update.Session
+    $searcher = $session.CreateUpdateSearcher()
+    $searcher.ServerSelection = 2
+    $searchResult = $searcher.Search("IsInstalled=0 and Type='Driver'")
+    if ($searchResult.Updates.Count -eq 0) {
+        return [PSCustomObject]@{ ok = $true; message = 'Alle Treiber sind auf dem neuesten Stand.' } | ConvertTo-Json -Compress
+    }
+    $toDownload = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($update in $searchResult.Updates) {
+        $toDownload.Add($update) | Out-Null
+    }
+    $downloader = $session.CreateUpdateDownloader()
+    $downloader.Updates = $toDownload
+    $downloader.Download()
+    
+    $toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($update in $searchResult.Updates) {
+        if ($update.IsDownloaded) {
+            $toInstall.Add($update) | Out-Null
+        }
+    }
+    if ($toInstall.Count -eq 0) {
+        return [PSCustomObject]@{ ok = $false; error = 'Treiber konnten nicht heruntergeladen werden.' } | ConvertTo-Json -Compress
+    }
+    $installer = $session.CreateUpdateInstaller()
+    $installer.Updates = $toInstall
+    $installer.ForceQuiet = $true
+    $installationResult = $installer.Install()
+    
+    [PSCustomObject]@{
+        ok = $true
+        resultCode = $installationResult.ResultCode
+        count = $toInstall.Count
+        rebootRequired = [bool]$installationResult.RebootRequired
+    } | ConvertTo-Json -Compress
+} catch {
+    [PSCustomObject]@{ ok = $false; error = $_.Exception.Message } | ConvertTo-Json -Compress
+}
+`;
+    try {
+      await lhm.powershellElevated(psScript);
+      return { ok: true, message: "Treiber-Installation wurde erfolgreich ausgeführt!" };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   ipcMain.on("window:minimize", () => win.minimize());
   ipcMain.on("window:maximize", () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   ipcMain.on("window:close", () => win.close());

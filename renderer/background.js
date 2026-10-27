@@ -157,6 +157,7 @@
   if (!reduceMotion) requestAnimationFrame(loop);
 
   window.NebulaBG = {
+    getHeat() { return heat; },
     setHeat(v) {
       heatTarget = Math.max(0, Math.min(1, v));
       if (reduceMotion) { heat = heatTarget; draw(); }

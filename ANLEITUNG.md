@@ -49,3 +49,14 @@ Portable Version: Sensoren → „Sensoren einrichten“ (einmalig, eine Windows
   (ohne Temperatursensor folgen sie der CPU-Auslastung).
 - Einstellungen → Wärmebild-Palette: Ironbow, Arktis, Lava, Weiß-heiß
 - Schrift: Chakra Petch (SIL Open Font License, siehe renderer/fonts/OFL.txt)
+
+
+## Debug-, Fehler- & Treiber-Manager
+- **🛠️ Debug & Treiber** in der Seitenleiste:
+  - **Treiber-Manager**: Scannt alle installierten Plug-and-Play-Gerätetreiber mit Version, Hersteller, Datum und Signatur.
+  - **Treiber-Updates**: Sucht direkt über die Windows Update API nach neueren Treibern und installiert sie auf Knopfdruck.
+  - **PC-Fehlerprotokoll**: Liest die Windows-Ereignisanzeige (System- und Anwendungsfehler, Bluescreens, WHEA-Fehler) mit Suchfilter aus.
+  - **Live-Metriken**: Abfrage-Latenzen (Fast/Slow ms) und LibreHardwareMonitor-JSON.
+- **Tastenkürzel**:
+  - `F12` oder `Strg + Shift + D`: Floating HUD Overlay ein-/ausblenden
+  - `Strg + Shift + I`: DevTools öffnen

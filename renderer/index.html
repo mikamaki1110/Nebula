@@ -53,10 +53,12 @@
       <button class="nav" data-view="sensors"><span class="nav__icon">♨</span>Sensoren</button>
       <button class="nav" data-view="notes"><span class="nav__icon">✎</span>Notizen</button>
       <button class="nav" data-view="settings"><span class="nav__icon">⚙</span>Einstellungen</button>
+      <button class="nav" data-view="debug"><span class="nav__icon">🛠</span>Debug & Treiber</button>
       <div class="sidebar__foot">
         <div class="mini-stat"><span>Prozesse</span><strong id="side-procs">—</strong></div>
         <div class="mini-stat"><span>Laufzeit</span><strong id="side-uptime">—</strong></div>
         <div class="shortcut"><kbd>Strg</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd><small>ein-/ausblenden</small></div>
+        <div class="shortcut"><kbd>F12</kbd> / <kbd>Strg</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd><small>Debug HUD</small></div>
       </div>
     </nav>
 
@@ -250,6 +252,150 @@
         </div>
       </section>
 
+
+      <!-- ================= DEBUG, FEHLER & TREIBER ================= -->
+      <section class="view" id="view-debug">
+        <div class="toolbar">
+          <div>
+            <h2>Debug, Fehler & Treiber</h2>
+            <p class="muted">Windows-Ereignisse, Systemfehler-Diagnose, Treiberliste & Treiber-Aktualisierung</p>
+          </div>
+          <div class="toolbar__actions">
+            <button class="btn btn--ghost" id="btn-open-devmgmt">⚙ Geräte-Manager</button>
+            <button class="btn btn--ghost" id="btn-open-wu">🔄 Windows Update</button>
+            <button class="btn btn--primary" id="btn-devtools">💻 DevTools</button>
+            <button class="btn btn--ghost" id="btn-toggle-hud">📌 HUD ein/aus</button>
+          </div>
+        </div>
+
+        <!-- Debug-Unterseiten-Tabs -->
+        <div class="segmented segmented--wide" id="debug-tabs">
+          <button class="active" data-dbg-tab="drivers">🎛️ Treiber-Manager</button>
+          <button data-dbg-tab="errors">⚠️ PC-Fehlerprotokoll</button>
+          <button data-dbg-tab="metrics">⚡ Live-Metriken & Payloads</button>
+        </div>
+
+        <!-- TAB 1: Treiber-Manager -->
+        <div class="dbg-tab-panel" id="dbg-panel-drivers">
+          <div class="toolbar" style="padding: 4px 0 10px;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+              <label class="search" style="min-width: 240px;">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5 14 14" /></svg>
+                <input type="search" id="driver-search" placeholder="Treiber oder Gerät suchen…" autocomplete="off" spellcheck="false" />
+              </label>
+              <button class="btn btn--ghost btn--small" id="btn-refresh-drivers">↻ Treiber scannen</button>
+              <button class="btn btn--primary btn--small" id="btn-check-driver-updates">🔍 Nach Treiber-Updates suchen</button>
+            </div>
+            <span class="chip" id="driver-status-chip">Treiber bereit</span>
+          </div>
+
+          <!-- Bereich für gefundene Treiber-Updates -->
+          <div class="card glass hidden" id="driver-update-banner" style="border-color: var(--accent); margin-bottom: 12px;">
+            <div class="card__head" style="margin-bottom: 8px;">
+              <h3 id="driver-update-title">Gefundene Treiber-Updates</h3>
+              <button class="btn btn--primary btn--small" id="btn-install-driver-updates">⬇ Alle Updates jetzt installieren</button>
+            </div>
+            <div id="driver-update-list" class="dbg-update-list"></div>
+          </div>
+
+          <div class="card glass proc-card">
+            <div class="prow prow--head" style="grid-template-columns: minmax(0, 1.6fr) 140px 110px 110px 80px;">
+              <button>Gerätename / Hardware</button>
+              <button>Hersteller</button>
+              <button class="num">Version</button>
+              <button class="num">Datum</button>
+              <button class="num">Signiert</button>
+            </div>
+            <div id="driver-list" style="max-height: 480px; overflow-y: auto;">
+              <p class="empty" style="padding: 14px;">Treiber werden beim ersten Klick eingelesen…</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: PC-Fehlerprotokoll -->
+        <div class="dbg-tab-panel hidden" id="dbg-panel-errors">
+          <div class="toolbar" style="padding: 4px 0 10px;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+              <label class="search" style="min-width: 240px;">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5 14 14" /></svg>
+                <input type="search" id="error-search" placeholder="Fehler filtern (z.B. WHEA, Bluescreen, App)…" autocomplete="off" spellcheck="false" />
+              </label>
+              <button class="btn btn--ghost btn--small" id="btn-refresh-errors">↻ Fehler neu abfragen</button>
+            </div>
+            <span class="chip off" id="error-count-chip">0 Fehler</span>
+          </div>
+
+          <div class="card glass proc-card">
+            <div class="prow prow--head" style="grid-template-columns: 140px 110px 130px minmax(0, 1fr);">
+              <button>Zeitpunkt</button>
+              <button>Schweregrad</button>
+              <button>Quelle / ID</button>
+              <button>Fehlermeldung</button>
+            </div>
+            <div id="error-list" style="max-height: 480px; overflow-y: auto;">
+              <p class="empty" style="padding: 14px;">Fehler werden abgefragt…</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: Live-Metriken & Payloads -->
+        <div class="dbg-tab-panel hidden" id="dbg-panel-metrics">
+          <div class="stats" id="debug-stats">
+            <div class="card glass stat-item">
+              <div class="stat-item__label">Fast-Tick Latenz</div>
+              <div class="stat-item__value" id="dbg-stat-fast">—</div>
+              <div class="stat-item__sub">Intervall: 1500 ms</div>
+            </div>
+            <div class="card glass stat-item">
+              <div class="stat-item__label">Slow-Tick Latenz</div>
+              <div class="stat-item__value" id="dbg-stat-slow">—</div>
+              <div class="stat-item__sub">Intervall: 4000 ms</div>
+            </div>
+            <div class="card glass stat-item">
+              <div class="stat-item__label">Prozess-Abfrage</div>
+              <div class="stat-item__value" id="dbg-stat-proc">—</div>
+              <div class="stat-item__sub" id="dbg-stat-proc-sub">Intervall: 4000 ms</div>
+            </div>
+            <div class="card glass stat-item">
+              <div class="stat-item__label">LHM Sensor-Dienst</div>
+              <div class="stat-item__value" id="dbg-stat-lhm">—</div>
+              <div class="stat-item__sub" id="dbg-stat-lhm-sub">Port 8085</div>
+            </div>
+            <div class="card glass stat-item">
+              <div class="stat-item__label">App-Speicher (Main)</div>
+              <div class="stat-item__value" id="dbg-stat-ram">—</div>
+              <div class="stat-item__sub" id="dbg-stat-ram-sub">Heap / RSS</div>
+            </div>
+          </div>
+
+          <div class="grid grid--2" style="margin-top: 14px;">
+            <div class="card glass">
+              <div class="card__head">
+                <h3>Live Fast Payload (JSON)</h3>
+                <span class="muted" id="dbg-fast-count">0 Felder</span>
+              </div>
+              <pre class="debug-code" id="dbg-fast-dump">Warte auf Daten…</pre>
+            </div>
+
+            <div class="card glass">
+              <div class="card__head">
+                <h3>Live Slow Payload & LHM (JSON)</h3>
+                <span class="muted" id="dbg-slow-count">0 Sensoren</span>
+              </div>
+              <pre class="debug-code" id="dbg-slow-dump">Warte auf Daten…</pre>
+            </div>
+          </div>
+
+          <div class="card glass" style="margin-top: 14px;">
+            <div class="card__head">
+              <h3>Electron Runtime & Node-Metriken</h3>
+              <button class="btn btn--ghost btn--small" id="btn-refresh-metrics">↻ Aktualisieren</button>
+            </div>
+            <pre class="debug-code" id="dbg-metrics-dump">Warte auf Metriken…</pre>
+          </div>
+        </div>
+      </section>
+
       <!-- ================= EINSTELLUNGEN ================= -->
       <section class="view" id="view-settings">
         <div class="card glass settings">
@@ -296,6 +442,27 @@
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- Floating Debug HUD (aktivierbar mit F12 / Strg+Shift+D) -->
+  <div id="debug-hud" class="debug-hud hidden">
+    <div class="debug-hud__head">
+      <span>🛠️ NEBULA DEBUG HUD</span>
+      <div class="debug-hud__actions">
+        <button id="hud-devtools" title="DevTools">💻</button>
+        <button id="hud-close" title="Schließen">✕</button>
+      </div>
+    </div>
+    <div class="debug-hud__body">
+      <div class="hud-row"><span>Fast Latency:</span><strong id="hud-fast-lat">—</strong></div>
+      <div class="hud-row"><span>Slow Latency:</span><strong id="hud-slow-lat">—</strong></div>
+      <div class="hud-row"><span>LHM Status:</span><strong id="hud-lhm-status">—</strong></div>
+      <div class="hud-row"><span>LHM Sensoren:</span><strong id="hud-lhm-count">—</strong></div>
+      <div class="hud-row"><span>Prozessliste:</span><strong id="hud-proc-count">—</strong></div>
+      <div class="hud-row"><span>Hintergrund-Hitze:</span><strong id="hud-heat-val">—</strong></div>
+      <div class="hud-row"><span>Aktuelle Ansicht:</span><strong id="hud-view-val">dashboard</strong></div>
+    </div>
+  </div>
+
   <script src="background.js"></script>
   <script src="renderer.js"></script>
   <script src="processes.js"></script>

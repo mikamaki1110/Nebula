@@ -27,6 +27,16 @@ contextBridge.exposeInMainWorld("nebula", {
     copy: () => ipcRenderer.invoke("report:copy"),
     save: () => ipcRenderer.invoke("report:save"),
   },
+  debug: {
+    toggleDevTools: () => ipcRenderer.send("debug:toggleDevTools"),
+    metrics: () => ipcRenderer.invoke("debug:metrics"),
+    getErrors: (limit) => ipcRenderer.invoke("debug:getErrors", limit),
+    getDrivers: () => ipcRenderer.invoke("debug:getDrivers"),
+    checkDriverUpdates: () => ipcRenderer.invoke("debug:checkDriverUpdates"),
+    installDriverUpdates: () => ipcRenderer.invoke("debug:installDriverUpdates"),
+    openDeviceManager: () => ipcRenderer.send("debug:openDeviceManager"),
+    openWindowsUpdate: () => ipcRenderer.send("debug:openWindowsUpdate"),
+  },
   store: {
     get: () => ipcRenderer.invoke("store:get"),
     saveNotes: (text) => ipcRenderer.invoke("notes:save", text),

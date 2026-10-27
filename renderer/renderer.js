@@ -274,6 +274,8 @@ function showView(name) {
   if (name !== "detail") window.Details?.close();
   if (name === "notes") $("notes").focus();
   if (name === "processes") $("proc-search").focus();
+  if (name === "debug") onOpenDebugView();
+  if ($("hud-view-val")) $("hud-view-val").textContent = name;
   requestAnimationFrame(redrawCharts);
 }
 document.querySelectorAll(".nav").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
@@ -310,11 +312,15 @@ function buildCores(count) {
   }
 }
 
+let lastFastMs = 0;
 async function updateFast() {
   if (fastBusy) return;
   fastBusy = true;
+  const t0 = performance.now();
   try {
     const f = await api.hw.fast();
+    lastFastMs = performance.now() - t0;
+    updateDebugFast(f, lastFastMs);
     fast = f;
 
     setTile("t-cpu", f.cpu, `${f.cpu}%`, f.cpuSpeed ? `${f.cpuSpeed.toFixed(2)} GHz` : hw?.cpu?.name ?? "");
@@ -355,11 +361,15 @@ async function updateFast() {
 // =====================================================================
 let slowBusy = false;
 
+let lastSlowMs = 0;
 async function updateSlow() {
   if (slowBusy) return;
   slowBusy = true;
+  const t0 = performance.now();
   try {
     slow = await api.hw.slow();
+    lastSlowMs = performance.now() - t0;
+    updateDebugSlow(slow, lastSlowMs);
     pushHist("cpuTemp", slow.cpuTemp, HIST_SLOW);
     pushHist("gpuTemp", slow.gpus[0]?.temp ?? null, HIST_SLOW);
     pushHist("gpuLoad", slow.gpus[0]?.load ?? null, HIST_SLOW);
@@ -439,11 +449,15 @@ function renderDiskTile() {
 
 // ---------- Prozesse (eigene Schleife, Darstellung in processes.js) ----------
 let procsBusy = false;
+let lastProcMs = 0;
 async function updateProcs() {
   if (procsBusy) return;
   procsBusy = true;
+  const t0 = performance.now();
   try {
     procs = await api.hw.procs();
+    lastProcMs = performance.now() - t0;
+    updateDebugProcs(procs, lastProcMs);
     window.Processes?.render();
     $("side-procs").textContent = procs.processCount || "—";
     if (slow) renderSources();
@@ -921,7 +935,314 @@ async function init() {
 
   refreshSensorStatus();
   setInterval(refreshSensorStatus, 20000);
+  initDebugHandlers();
 }
 
 // Erst starten, wenn auch processes.js und details.js geladen sind
 window.addEventListener("DOMContentLoaded", init);
+
+
+// =====================================================================
+// Debug-, Fehler- & Treiber-Manager Logik
+// =====================================================================
+let loadedDrivers = [];
+let loadedErrors = [];
+let foundUpdates = [];
+let driversLoadedOnce = false;
+let errorsLoadedOnce = false;
+
+function onOpenDebugView() {
+  if (!driversLoadedOnce) loadDrivers();
+  updateDebugMetrics();
+}
+
+function toggleDebugHud() {
+  const hud = $("debug-hud");
+  if (hud) hud.classList.toggle("hidden");
+}
+
+function updateDebugFast(f, ms) {
+  if ($("dbg-stat-fast")) $("dbg-stat-fast").textContent = `${ms.toFixed(1)} ms`;
+  if ($("hud-fast-lat")) $("hud-fast-lat").textContent = `${ms.toFixed(1)} ms`;
+  if ($("hud-heat-val") && window.NebulaBG?.getHeat) {
+    $("hud-heat-val").textContent = `${(window.NebulaBG.getHeat() * 100).toFixed(0)} %`;
+  }
+  if (currentView === "debug" && $("dbg-fast-dump")) {
+    $("dbg-fast-dump").textContent = JSON.stringify(f, null, 2);
+    if ($("dbg-fast-count")) $("dbg-fast-count").textContent = `${Object.keys(f || {}).length} Felder`;
+  }
+}
+
+function updateDebugSlow(s, ms) {
+  if ($("dbg-stat-slow")) $("dbg-stat-slow").textContent = `${ms.toFixed(1)} ms`;
+  if ($("hud-slow-lat")) $("hud-slow-lat").textContent = `${ms.toFixed(1)} ms`;
+  const connected = Boolean(s.lhm?.connected);
+  const sensorCount = s.lhm?.sensors?.length ?? 0;
+  if ($("dbg-stat-lhm")) {
+    $("dbg-stat-lhm").textContent = connected ? "Online" : "Offline";
+    $("dbg-stat-lhm").style.color = connected ? "var(--cool)" : "var(--hot)";
+  }
+  if ($("hud-lhm-status")) {
+    $("hud-lhm-status").textContent = connected ? "Online" : "Offline";
+    $("hud-lhm-status").style.color = connected ? "var(--cool)" : "var(--hot)";
+  }
+  if ($("hud-lhm-count")) $("hud-lhm-count").textContent = `${sensorCount}`;
+  if ($("dbg-stat-lhm-sub")) $("dbg-stat-lhm-sub").textContent = `${sensorCount} Sensoren (Port ${settings.lhmPort ?? 8085})`;
+
+  if (currentView === "debug" && $("dbg-slow-dump")) {
+    const cleanSlow = { ...s };
+    delete cleanSlow.processes;
+    $("dbg-slow-dump").textContent = JSON.stringify(cleanSlow, null, 2);
+    if ($("dbg-slow-count")) $("dbg-slow-count").textContent = `${sensorCount} Sensoren`;
+  }
+}
+
+function updateDebugProcs(p, ms) {
+  if ($("dbg-stat-proc")) $("dbg-stat-proc").textContent = `${ms.toFixed(1)} ms`;
+  if ($("hud-proc-count")) $("hud-proc-count").textContent = `${p?.processCount ?? 0} (${p?.processes?.length ?? 0} Grp)`;
+  if ($("dbg-stat-proc-sub")) $("dbg-stat-proc-sub").textContent = `${p?.processCount ?? 0} Tasks via ${p?.source ?? '—'}`;
+}
+
+async function updateDebugMetrics() {
+  try {
+    if (!api.debug?.metrics) return;
+    const m = await api.debug.metrics();
+    if ($("dbg-stat-ram") && m?.mainMemory?.rss) {
+      $("dbg-stat-ram").textContent = fmtBytes(m.mainMemory.rss);
+      if ($("dbg-stat-ram-sub")) $("dbg-stat-ram-sub").textContent = `Heap: ${fmtBytes(m.mainMemory.heapUsed)} / ${fmtBytes(m.mainMemory.heapTotal)}`;
+    }
+    if ($("dbg-metrics-dump")) {
+      $("dbg-metrics-dump").textContent = JSON.stringify(m, null, 2);
+    }
+  } catch (err) {
+    console.error("Debug metrics error:", err);
+  }
+}
+
+// ---------- Treiber-Funktionen ----------
+async function loadDrivers() {
+  driversLoadedOnce = true;
+  const box = $("driver-list");
+  const chip = $("driver-status-chip");
+  if (chip) chip.textContent = "Treiber werden gescannt…";
+  box.innerHTML = '<p class="empty" style="padding: 14px;">Treiber werden eingelesen…</p>';
+  try {
+    loadedDrivers = await api.debug.getDrivers();
+    if (chip) chip.textContent = `${loadedDrivers.length} Treiber erkannt`;
+    renderDrivers();
+  } catch (err) {
+    box.innerHTML = `<p class="empty" style="padding: 14px; color: var(--hot);">Fehler beim Laden: ${err.message}</p>`;
+    if (chip) chip.textContent = "Fehler beim Scan";
+  }
+}
+
+function renderDrivers() {
+  const box = $("driver-list");
+  const q = ($("driver-search")?.value || "").trim().toLowerCase();
+  const list = loadedDrivers.filter((d) => {
+    if (!q) return true;
+    return (d.name && d.name.toLowerCase().includes(q)) ||
+           (d.manufacturer && d.manufacturer.toLowerCase().includes(q)) ||
+           (d.deviceClass && d.deviceClass.toLowerCase().includes(q));
+  });
+
+  box.replaceChildren();
+  if (!list.length) {
+    box.innerHTML = '<p class="empty" style="padding: 14px;">Keine passenden Treiber gefunden.</p>';
+    return;
+  }
+
+  list.forEach((d) => {
+    const row = el("div", "prow prow--item");
+    row.style.gridTemplateColumns = "minmax(0, 1.6fr) 140px 110px 110px 80px";
+
+    const nameCol = el("span", null);
+    nameCol.innerHTML = `<strong>${d.name}</strong><br><small class="muted">${d.deviceClass || 'Gerät'}</small>`;
+    
+    const manuCol = el("span", "muted", d.manufacturer || "Unbekannt");
+    const verCol = el("span", "num", d.version || "—");
+    const dateCol = el("span", "num muted", d.date || "—");
+    const signCol = el("span", "num", d.signed ? "Ja ✓" : "Nein");
+    if (d.signed) signCol.style.color = "var(--cool)";
+
+    row.append(nameCol, manuCol, verCol, dateCol, signCol);
+    box.append(row);
+  });
+}
+
+async function checkDriverUpdates() {
+  const btn = $("btn-check-driver-updates");
+  const banner = $("driver-update-banner");
+  const list = $("driver-update-list");
+  btn.disabled = true;
+  btn.textContent = "Suche läuft…";
+  toast("Suche nach Treiber-Updates über Windows Update läuft…");
+  try {
+    const res = await api.debug.checkDriverUpdates();
+    btn.disabled = false;
+    btn.textContent = "🔍 Nach Treiber-Updates suchen";
+    if (!res.ok) {
+      toast(`Update-Suche: ${res.error || 'Fehler'}`);
+      return;
+    }
+    foundUpdates = res.updates || [];
+    if (foundUpdates.length === 0) {
+      toast("Alle PC-Treiber sind auf dem neuesten Stand! ✓");
+      banner.classList.add("hidden");
+    } else {
+      toast(`${foundUpdates.length} Treiber-Update(s) verfügbar!`);
+      banner.classList.remove("hidden");
+      $("driver-update-title").textContent = `${foundUpdates.length} Treiber-Update(s) verfügbar`;
+      list.replaceChildren();
+      foundUpdates.forEach((u) => {
+        const item = el("div", "dbg-update-item");
+        const info = el("div", "dbg-update-info");
+        info.innerHTML = `<strong>${u.title}</strong><small>${u.driverModel || u.driverProvider || u.driverClass || ''}</small>`;
+        item.append(info);
+        list.append(item);
+      });
+    }
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "🔍 Nach Treiber-Updates suchen";
+    toast(`Fehler: ${err.message}`);
+  }
+}
+
+async function installDriverUpdates() {
+  const ok = await confirmDialog({
+    title: "Treiber jetzt aktualisieren?",
+    text: "Die gefundenen Treiber werden jetzt über den Windows-Updatedienst heruntergeladen und installiert. Bitte den PC währenddessen nicht ausschalten.",
+    ok: "Jetzt installieren",
+    danger: false,
+  });
+  if (!ok) return;
+
+  const btn = $("btn-install-driver-updates");
+  btn.disabled = true;
+  btn.textContent = "Installiere…";
+  toast("Treiber-Installation gestartet… Bitte warten.");
+
+  try {
+    const res = await api.debug.installDriverUpdates();
+    btn.disabled = false;
+    btn.textContent = "⬇ Alle Updates jetzt installieren";
+    if (res.ok) {
+      toast(res.message || "Treiber erfolgreich aktualisiert! ✓");
+      $("driver-update-banner").classList.add("hidden");
+      loadDrivers();
+    } else {
+      toast(`Installation: ${res.error || 'Fehlgeschlagen'}`);
+    }
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "⬇ Alle Updates jetzt installieren";
+    toast(`Fehler: ${err.message}`);
+  }
+}
+
+// ---------- Fehler-Funktionen ----------
+async function loadErrors() {
+  errorsLoadedOnce = true;
+  const box = $("error-list");
+  const chip = $("error-count-chip");
+  if (chip) chip.textContent = "Lese Fehler…";
+  box.innerHTML = '<p class="empty" style="padding: 14px;">Ereignisprotokoll wird durchsucht…</p>';
+  try {
+    loadedErrors = await api.debug.getErrors(60);
+    if (chip) {
+      chip.textContent = `${loadedErrors.length} Ereignisse`;
+      chip.className = `chip ${loadedErrors.length > 0 ? 'off' : 'ok'}`;
+    }
+    renderErrors();
+  } catch (err) {
+    box.innerHTML = `<p class="empty" style="padding: 14px; color: var(--hot);">Fehler beim Laden: ${err.message}</p>`;
+    if (chip) chip.textContent = "Fehler";
+  }
+}
+
+function renderErrors() {
+  const box = $("error-list");
+  const q = ($("error-search")?.value || "").trim().toLowerCase();
+  const list = loadedErrors.filter((e) => {
+    if (!q) return true;
+    return (e.message && e.message.toLowerCase().includes(q)) ||
+           (e.provider && e.provider.toLowerCase().includes(q)) ||
+           (e.level && e.level.toLowerCase().includes(q)) ||
+           String(e.id).includes(q);
+  });
+
+  box.replaceChildren();
+  if (!list.length) {
+    box.innerHTML = '<p class="empty" style="padding: 14px;">Keine kritischen Fehler im ausgewählten Zeitraum gefunden. Das System läuft stabil! ✓</p>';
+    return;
+  }
+
+  list.forEach((e) => {
+    const row = el("div", "prow prow--item");
+    row.style.gridTemplateColumns = "140px 110px 130px minmax(0, 1fr)";
+    row.style.alignItems = "start";
+
+    const timeCol = el("span", "muted", e.time);
+    
+    const lvlCol = el("span", null);
+    const badge = el("span", `level-badge ${e.level.toLowerCase().includes('krit') ? 'critical' : 'error'}`, e.level);
+    lvlCol.append(badge);
+
+    const srcCol = el("span", null);
+    srcCol.innerHTML = `<strong>${e.provider}</strong><br><small class="muted">ID: ${e.id}</small>`;
+
+    const msgCol = el("span", null, e.message);
+    msgCol.style.userSelect = "text";
+    msgCol.title = e.message;
+
+    row.append(timeCol, lvlCol, srcCol, msgCol);
+    box.append(row);
+  });
+}
+
+function initDebugHandlers() {
+  // Navigation innerhalb der Debug-Untertabs
+  document.querySelectorAll("#debug-tabs button").forEach((b) => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll("#debug-tabs button").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+      const tab = b.dataset.dbgTab;
+      $("dbg-panel-drivers")?.classList.toggle("hidden", tab !== "drivers");
+      $("dbg-panel-errors")?.classList.toggle("hidden", tab !== "errors");
+      $("dbg-panel-metrics")?.classList.toggle("hidden", tab !== "metrics");
+      if (tab === "errors" && !errorsLoadedOnce) loadErrors();
+      if (tab === "drivers" && !driversLoadedOnce) loadDrivers();
+      if (tab === "metrics") updateDebugMetrics();
+    });
+  });
+
+  // Buttons
+  $("btn-devtools")?.addEventListener("click", () => api.debug?.toggleDevTools());
+  $("hud-devtools")?.addEventListener("click", () => api.debug?.toggleDevTools());
+  $("btn-toggle-hud")?.addEventListener("click", toggleDebugHud);
+  $("hud-close")?.addEventListener("click", () => $("debug-hud")?.classList.add("hidden"));
+  $("btn-refresh-metrics")?.addEventListener("click", updateDebugMetrics);
+  $("btn-open-devmgmt")?.addEventListener("click", () => api.debug?.openDeviceManager());
+  $("btn-open-wu")?.addEventListener("click", () => api.debug?.openWindowsUpdate());
+
+  $("btn-refresh-drivers")?.addEventListener("click", loadDrivers);
+  $("driver-search")?.addEventListener("input", renderDrivers);
+  $("btn-check-driver-updates")?.addEventListener("click", checkDriverUpdates);
+  $("btn-install-driver-updates")?.addEventListener("click", installDriverUpdates);
+
+  $("btn-refresh-errors")?.addEventListener("click", loadErrors);
+  $("error-search")?.addEventListener("input", renderErrors);
+
+  // Tastenkombinationen
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "d")) {
+      e.preventDefault();
+      toggleDebugHud();
+    }
+    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "i") {
+      e.preventDefault();
+      api.debug?.toggleDevTools();
+    }
+  });
+}
