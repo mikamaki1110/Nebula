@@ -27,6 +27,23 @@ contextBridge.exposeInMainWorld("nebula", {
     copy: () => ipcRenderer.invoke("report:copy"),
     save: () => ipcRenderer.invoke("report:save"),
   },
+  clean: {
+    folders: () => ipcRenderer.invoke("clean:folders"),
+    scan: (opts) => ipcRenderer.invoke("clean:scan", opts),
+    cancel: () => ipcRenderer.invoke("clean:cancel"),
+    trash: (paths) => ipcRenderer.invoke("clean:trash", paths),
+    onProgress: (cb) => ipcRenderer.on("clean:progress", (_e, data) => cb(data)),
+  },
+  drivers: {
+    list: () => ipcRenderer.invoke("drivers:list"),
+    updates: () => ipcRenderer.invoke("drivers:updates"),
+    open: (target) => ipcRenderer.invoke("drivers:open", target),
+  },
+  debug: {
+    info: () => ipcRenderer.invoke("debug:info"),
+    clear: () => ipcRenderer.invoke("debug:clear"),
+    copy: (text) => ipcRenderer.invoke("debug:copy", text),
+  },
   store: {
     get: () => ipcRenderer.invoke("store:get"),
     saveNotes: (text) => ipcRenderer.invoke("notes:save", text),

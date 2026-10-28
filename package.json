@@ -1,7 +1,7 @@
 {
   "name": "nebula-desktop",
   "productName": "Nebula",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Hardware-Monitor für Windows: Temperaturen, Auslastung, Prozesse und alle Bauteile deines PCs",
   "main": "main.js",
   "author": "Nebula",
@@ -28,6 +28,7 @@
     "files": [
       "main.js",
       "lhm.js",
+      "cleaner.js",
       "preload.js",
       "renderer/**/*",
       "assets/**/*"

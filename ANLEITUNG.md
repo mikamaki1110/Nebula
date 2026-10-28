@@ -11,16 +11,16 @@ Einmalig einrichten:
 
 Version veröffentlichen:
 1. Auf github.com im Repository → **Actions** → **Nebula veröffentlichen** → **Run workflow**
-2. Nach ca. 5–10 Minuten liegt unter **Releases** die `Nebula-Setup-1.4.0.exe`
+2. Nach ca. 5–10 Minuten liegt unter **Releases** die `Nebula-Setup-1.5.0.exe`
 3. Diesen Link teilst du: `https://github.com/DEIN-NAME/nebula/releases/latest`
 
-Neue Version: in `package.json` die `version` erhöhen (z. B. 1.4.0), pushen, Workflow starten.
+Neue Version: in `package.json` die `version` erhöhen (z. B. 1.5.0), pushen, Workflow starten.
 Alle Nutzer bekommen das Update automatisch.
 
 ## EXE lokal bauen (nur zum Testen)
 Doppelklick auf `EXE-BAUEN.bat` → danach öffnet sich der Ordner `dist` mit:
-- `Nebula-Setup-1.4.0.exe` (Installer mit Desktop- und Startmenü-Verknüpfung)
-- `Nebula-Portable-1.4.0.exe` (portable Version, ohne Installation startbar)
+- `Nebula-Setup-1.5.0.exe` (Installer mit Desktop- und Startmenü-Verknüpfung)
+- `Nebula-Portable-1.5.0.exe` (portable Version, ohne Installation startbar)
 
 ## Zum Entwickeln starten
 1. Terminal im Ordner `nebula-desktop` öffnen

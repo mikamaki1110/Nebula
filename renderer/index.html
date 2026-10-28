@@ -51,7 +51,10 @@
       <button class="nav" data-view="processes"><span class="nav__icon">≡</span>Prozesse</button>
       <button class="nav" data-view="hardware"><span class="nav__icon">◧</span>Hardware</button>
       <button class="nav" data-view="sensors"><span class="nav__icon">♨</span>Sensoren</button>
+      <button class="nav" data-view="treiber"><span class="nav__icon">⬡</span>Treiber</button>
+      <button class="nav" data-view="speicher"><span class="nav__icon">◎</span>Speicher</button>
       <button class="nav" data-view="notes"><span class="nav__icon">✎</span>Notizen</button>
+      <button class="nav" data-view="debug"><span class="nav__icon">⌁</span>Debug</button>
       <button class="nav" data-view="settings"><span class="nav__icon">⚙</span>Einstellungen</button>
       <div class="sidebar__foot">
         <div class="mini-stat"><span>Prozesse</span><strong id="side-procs">—</strong></div>
@@ -241,8 +244,134 @@
         <div id="detail-body" class="detail-body"></div>
       </section>
 
+      <!-- ================= SPEICHER AUFRÄUMEN ================= -->
+      <section class="view" id="view-speicher">
+        <div class="toolbar">
+          <div>
+            <h2>Speicher aufräumen</h2>
+            <p class="muted">Doppelte, alte und Installer-Dateien finden. Gelöscht wird nur in den Papierkorb, also wiederherstellbar.</p>
+          </div>
+        </div>
+
+        <div class="clean-top">
+          <div class="card glass clean-setup">
+            <h3>Was suchen?</h3>
+            <div class="segmented seg-wide" id="clean-modes">
+              <button data-mode="duplicates" class="active">Doppelte</button>
+              <button data-mode="old">Alte Dateien</button>
+              <button data-mode="installers">Installer</button>
+            </div>
+            <p class="muted mode-hint" id="clean-hint"></p>
+
+            <h3 class="sub">Wo suchen?</h3>
+            <div class="chips" id="clean-folders"></div>
+
+            <div class="clean-opts">
+              <label class="field">Mindestgröße
+                <select class="input" id="clean-min">
+                  <option value="0">Alle Größen</option>
+                  <option value="1" selected>ab 1 MB</option>
+                  <option value="10">ab 10 MB</option>
+                  <option value="100">ab 100 MB</option>
+                </select>
+              </label>
+              <label class="field hidden" id="clean-days-wrap">Nicht benutzt seit
+                <select class="input" id="clean-days">
+                  <option value="90">3 Monaten</option>
+                  <option value="180">6 Monaten</option>
+                  <option value="365" selected>1 Jahr</option>
+                  <option value="730">2 Jahren</option>
+                </select>
+              </label>
+            </div>
+
+            <button class="btn btn--primary scan-btn" id="clean-start">Scan starten</button>
+          </div>
+
+          <div class="card glass clean-status" id="clean-status">
+            <div class="radar" id="clean-radar"><span></span></div>
+            <p class="clean-phase" id="clean-phase">Bereit</p>
+            <p class="muted" id="clean-sub">Wähle einen Modus und starte den Scan.</p>
+          </div>
+        </div>
+
+        <div class="stats3 hidden" id="clean-stats">
+          <div class="stat glass">
+            <span>Gefunden</span>
+            <strong id="cs-found">—</strong>
+            <small id="cs-count" class="muted"></small>
+          </div>
+          <div class="stat glass">
+            <span>Ausgewählt</span>
+            <strong id="cs-sel">—</strong>
+            <small id="cs-sel-count" class="muted"></small>
+          </div>
+          <div class="stat glass stat--donut">
+            <div class="donut" id="clean-donut"></div>
+            <ul class="legend" id="clean-legend"></ul>
+          </div>
+        </div>
+
+        <div class="card glass hidden" id="clean-results">
+          <div class="clean-actions">
+            <div class="toolbar__actions">
+              <button class="btn btn--ghost btn--small" id="clean-all">Alle auswählen</button>
+              <button class="btn btn--ghost btn--small" id="clean-none">Keine</button>
+            </div>
+            <button class="btn btn--danger btn--small" id="clean-trash" disabled>In den Papierkorb</button>
+          </div>
+          <div class="clean-list" id="clean-list"></div>
+        </div>
+      </section>
+
       <!-- ================= NOTIZEN ================= -->
+      <!-- ================= TREIBER ================= -->
+      <section class="view" id="view-treiber">
+        <div class="toolbar">
+          <div>
+            <h2>Treiber</h2>
+            <p class="muted">Installierte Gerätetreiber und verfügbare Updates</p>
+          </div>
+          <div class="toolbar__actions">
+            <button class="btn btn--ghost btn--small" id="drv-refresh">Liste aktualisieren</button>
+            <button class="btn btn--primary btn--small" id="drv-check">Nach Updates suchen</button>
+          </div>
+        </div>
+
+        <div class="card glass">
+          <div class="card__head">
+            <h3>Verfügbare Updates</h3>
+            <button class="link" data-open="ms-settings:windowsupdate-optionalupdates">In Windows Update öffnen →</button>
+          </div>
+          <div id="drv-updates"><p class="muted">Noch nicht geprüft. „Nach Updates suchen“ fragt Windows Update ab, das dauert bis zu einer Minute.</p></div>
+        </div>
+
+        <div class="card glass">
+          <h3>Grafiktreiber beim Hersteller</h3>
+          <p class="muted vendor-hint">Die Hersteller-Seiten haben oft neuere Versionen als Windows Update. Der Hersteller deiner Grafikkarte ist hervorgehoben.</p>
+          <div class="vendor-row">
+            <button class="vendor" data-vendor="nvidia" data-open="https://www.nvidia.com/de-de/drivers/"><span>NVIDIA</span><small>GeForce-Treiber</small></button>
+            <button class="vendor" data-vendor="amd" data-open="https://www.amd.com/de/support/download/drivers.html"><span>AMD</span><small>Radeon-Treiber</small></button>
+            <button class="vendor" data-vendor="intel" data-open="https://www.intel.com/content/www/us/en/download-center/home.html"><span>Intel</span><small>Arc / Grafik</small></button>
+          </div>
+        </div>
+
+        <div class="card glass">
+          <div class="card__head">
+            <h3>Installierte Treiber</h3>
+            <span class="muted" id="drv-count"></span>
+          </div>
+          <div id="drv-list"><p class="muted loading">Wird geladen …</p></div>
+        </div>
+      </section>
+
       <section class="view" id="view-notes">
+        <div class="toolbar">
+          <div>
+            <h2>Notizen</h2>
+            <p class="muted">Schnelle Gedanken, werden automatisch gespeichert</p>
+          </div>
+        </div>
         <div class="card glass notes">
           <div class="card__head"><h3>Notizen</h3><span class="muted" id="notes-status">Gespeichert</span></div>
           <textarea id="notes" spellcheck="true" placeholder="Schreib hier los… wird automatisch gespeichert."></textarea>
@@ -250,8 +379,46 @@
         </div>
       </section>
 
+      <!-- ================= DEBUG ================= -->
+      <section class="view" id="view-debug">
+        <div class="toolbar">
+          <div>
+            <h2>Debug</h2>
+            <p class="muted" id="debug-updated">Wird geladen …</p>
+          </div>
+          <div class="toolbar__actions">
+            <button class="btn btn--ghost btn--small" id="debug-copy">Alles kopieren</button>
+            <button class="btn btn--ghost btn--small" id="debug-clear">Protokoll leeren</button>
+          </div>
+        </div>
+        <div class="grid grid--2">
+          <div class="card glass">
+            <h3>Programm</h3>
+            <div id="debug-app"></div>
+          </div>
+          <div class="card glass">
+            <h3>Pfade &amp; Sensoren</h3>
+            <div id="debug-paths"></div>
+          </div>
+          <div class="card glass card--wide">
+            <h3>Abfragen (letzte Dauer)</h3>
+            <div id="debug-timings"></div>
+          </div>
+          <div class="card glass card--wide">
+            <h3>Protokoll <span class="muted" id="debug-count"></span></h3>
+            <div class="debug-log" id="debug-log"></div>
+          </div>
+        </div>
+      </section>
+
       <!-- ================= EINSTELLUNGEN ================= -->
       <section class="view" id="view-settings">
+        <div class="toolbar">
+          <div>
+            <h2>Einstellungen</h2>
+            <p class="muted">Darstellung, Verhalten und Sensor-Dienst</p>
+          </div>
+        </div>
         <div class="card glass settings">
           <h3>Einstellungen</h3>
           <div class="setting">

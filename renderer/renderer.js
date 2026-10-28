@@ -275,6 +275,9 @@ function showView(name) {
   if (name === "notes") $("notes").focus();
   if (name === "processes") $("proc-search").focus();
   requestAnimationFrame(redrawCharts);
+  if (name === "debug") renderDebug();
+  if (name === "treiber" && !driversLoaded) loadDrivers();
+  if (name === "speicher" && !cleanReady) { cleanReady = true; initClean(); }
 }
 document.querySelectorAll(".nav").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
 // Klicks auf alles mit data-goto (Ansicht) oder data-detail (Detailseite)
@@ -921,7 +924,470 @@ async function init() {
 
   refreshSensorStatus();
   setInterval(refreshSensorStatus, 20000);
+
+  setInterval(renderDebug, 2000);
 }
+
+// =====================================================================
+// Debug-Ansicht
+// =====================================================================
+const TIMING_LABELS = {
+  "hw:fast": "Live-Werte (CPU, RAM, Netz)",
+  "hw:slow": "Temperaturen, GPU, Laufwerke",
+  "hw:procs": "Prozessliste",
+  "hw:static": "Hardware-Informationen",
+};
+const LEVEL_LABELS = { info: "Info", warn: "Warnung", error: "Fehler" };
+let lastDebugLog = null;
+let driversLoaded = false;
+let cleanReady = false;
+
+function debugText(d) {
+  const lines = [
+    `Nebula ${d.app.version} | ${d.app.packaged ? "installiert" : "Entwicklung/portabel"}`,
+    `Windows/System: ${d.app.platform} | Electron ${d.app.electron} | Node ${d.app.node}`,
+    `Datenordner: ${d.paths.userData}`,
+    `Sensor-Dienst: ${d.paths.sensors} | Port ${d.paths.port} | ${d.lhmConnected ? "verbunden" : "nicht verbunden"}`,
+    `Prozesse: ${d.procsCount ?? "—"} (${d.procsSource ?? "keine Quelle"})`,
+    "",
+    "Abfragen:",
+    ...Object.entries(TIMING_LABELS).map(([key, label]) => {
+      const t = d.timings[key];
+      if (!t) return `  ${label}: noch nicht abgefragt`;
+      return `  ${label}: ${t.ok ? "OK" : "FEHLER " + t.error} (${t.ms} ms, ${t.at})`;
+    }),
+    "",
+    "Protokoll (neueste zuerst):",
+    ...d.log.map((e) => `  ${e.time} [${LEVEL_LABELS[e.level] ?? e.level}] ${e.source}: ${e.message}`),
+  ];
+  return lines.join("\n");
+}
+
+async function renderDebug() {
+  if (currentView !== "debug") return;
+  let d;
+  try {
+    d = await api.debug.info();
+  } catch (err) {
+    $("debug-updated").textContent = `Konnte Debug-Daten nicht lesen: ${err.message}`;
+    return;
+  }
+  lastDebugLog = d;
+  $("debug-updated").textContent = `Stand ${new Date().toLocaleTimeString("de-DE")} · läuft seit ${fmtUptime(d.app.uptime)}`;
+
+  $("debug-app").replaceChildren(infoList([
+    ["Version", d.app.version],
+    ["Installiert", d.app.packaged ? "ja" : "nein (Entwicklung / portabel)"],
+    ["System", d.app.platform],
+    ["Electron", d.app.electron],
+    ["Node", d.app.node],
+    ["Prozess-ID", d.app.pid],
+    ["Speicher", `${d.app.memory} MB`],
+  ]));
+
+  $("debug-paths").replaceChildren(infoList([
+    ["Datenordner", d.paths.userData],
+    ["Sensor-Ordner", d.paths.sensors],
+    ["Sensor-Port", d.paths.port],
+    ["Sensor-Dienst", d.lhmConnected ? "verbunden" : "nicht erreichbar"],
+    ["Prozess-Quelle", d.procsSource ? `${d.procsSource} (${d.procsCount} Einträge)` : "keine"],
+  ]));
+
+  const table = el("table", "dtimes");
+  const head = el("tr");
+  ["Abfrage", "Status", "Dauer", "Zuletzt"].forEach((h) => head.append(el("th", null, h)));
+  table.append(head);
+  Object.entries(TIMING_LABELS).forEach(([key, label]) => {
+    const t = d.timings[key];
+    const tr = el("tr");
+    tr.append(el("td", null, label));
+    if (!t) {
+      tr.append(el("td", "muted", "—"), el("td", "muted", "—"), el("td", "muted", "—"));
+    } else {
+      tr.append(
+        el("td", t.ok ? "ok" : "bad", t.ok ? "OK" : `Fehler: ${t.error}`),
+        el("td", null, `${t.ms} ms`),
+        el("td", null, new Date(t.at).toLocaleTimeString("de-DE")),
+      );
+    }
+    table.append(tr);
+  });
+  $("debug-timings").replaceChildren(table);
+
+  $("debug-count").textContent = `(${d.log.length})`;
+  const log = $("debug-log");
+  if (!d.log.length) {
+    log.replaceChildren(el("p", "debug-empty", "Keine Einträge. Alles läuft ohne Auffälligkeiten."));
+  } else {
+    log.replaceChildren(...d.log.map((e) => {
+      const row = el("div", `dlog-row ${e.level}`);
+      row.append(
+        el("span", "time", new Date(e.time).toLocaleTimeString("de-DE")),
+        el("span", "lvl", LEVEL_LABELS[e.level] ?? e.level),
+        el("span", "src", e.source),
+        el("span", "msg", e.message),
+      );
+      return row;
+    }));
+  }
+}
+
+$("debug-copy").addEventListener("click", async () => {
+  if (!lastDebugLog) await renderDebug();
+  if (!lastDebugLog) return;
+  await api.debug.copy(debugText(lastDebugLog));
+  toast("Debug-Infos in die Zwischenablage kopiert");
+});
+$("debug-clear").addEventListener("click", async () => {
+  await api.debug.clear();
+  renderDebug();
+});
+
+// =====================================================================
+// Treiber
+// =====================================================================
+const CLASS_LABELS = {
+  DISPLAY: "Grafik", NET: "Netzwerk", MEDIA: "Audio", HDC: "Speicher-Controller",
+  SCSIAdapter: "Speicher", BLUETOOTH: "Bluetooth", SYSTEM: "Chipsatz",
+};
+const CLASS_ORDER = ["DISPLAY", "NET", "MEDIA", "HDC", "SCSIAdapter", "BLUETOOTH", "SYSTEM"];
+
+// Alter eines Treibers als Text und Zustand (Farbe)
+function driverAge(date) {
+  if (!date) return { text: "unbekannt", state: "na" };
+  const days = Math.floor((Date.now() - new Date(`${date}T00:00:00`)) / 86400000);
+  const months = Math.round(days / 30.4);
+  let text;
+  if (months < 1) text = "unter 1 Monat";
+  else if (months < 24) text = `${months} Monate`;
+  else text = `${Math.floor(months / 12)} Jahre`;
+  const state = days < 365 ? "cool" : days < 730 ? "warm" : "hot";
+  return { text: `vor ${text}`, state };
+}
+
+function driverRow(cells) {
+  const tr = el("tr");
+  cells.forEach((c) => tr.append(c));
+  return tr;
+}
+
+async function loadDrivers() {
+  $("drv-list").replaceChildren(el("p", "muted loading", "Wird geladen …"));
+  const res = await api.drivers.list();
+  driversLoaded = true;
+  if (!res.ok) {
+    $("drv-count").textContent = "";
+    $("drv-list").replaceChildren(el("p", "muted", res.error));
+    return;
+  }
+
+  // Herstellerkarten: passenden Grafikhersteller hervorheben
+  const gpuText = res.list.filter((d) => d.cls === "DISPLAY").map((d) => `${d.maker ?? ""} ${d.name}`).join(" ");
+  document.querySelectorAll(".vendor").forEach((b) => {
+    const match = new RegExp(b.dataset.vendor, "i").test(gpuText);
+    b.classList.toggle("is-match", match);
+  });
+
+  $("drv-count").textContent = `${res.list.length} Treiber`;
+  const sorted = [...res.list].sort((a, b) =>
+    (CLASS_ORDER.indexOf(a.cls) - CLASS_ORDER.indexOf(b.cls)) || a.name.localeCompare(b.name, "de"));
+
+  const table = el("table", "table");
+  const head = el("tr");
+  ["Gerät", "Art", "Version", "Datum", "Alter"].forEach((h, i) => head.append(el("th", i === 4 ? "num" : null, h)));
+  const thead = el("thead");
+  thead.append(head);
+  table.append(thead);
+  const body = el("tbody");
+  sorted.forEach((d) => {
+    const age = driverAge(d.date);
+    const ageCell = el("td", "num");
+    ageCell.append(el("span", `age age--${age.state}`, age.text));
+    const nameCell = el("td");
+    nameCell.append(el("strong", null, d.name), el("div", "muted", d.maker ?? ""));
+    body.append(driverRow([
+      nameCell,
+      el("td", null, CLASS_LABELS[d.cls] ?? d.cls ?? "—"),
+      el("td", "mono", d.version ?? "—"),
+      el("td", "mono", d.date ?? "—"),
+      ageCell,
+    ]));
+  });
+  table.append(body);
+  $("drv-list").replaceChildren(table);
+}
+
+async function checkDriverUpdates() {
+  const btn = $("drv-check");
+  btn.disabled = true;
+  btn.textContent = "Suche läuft …";
+  $("drv-updates").replaceChildren(el("p", "muted loading", "Windows Update wird abgefragt. Das kann bis zu einer Minute dauern …"));
+  const res = await api.drivers.updates();
+  btn.disabled = false;
+  btn.textContent = "Nach Updates suchen";
+
+  if (!res.ok) {
+    $("drv-updates").replaceChildren(el("p", "muted", `Suche fehlgeschlagen: ${res.error}`));
+    return;
+  }
+  if (!res.list.length) {
+    $("drv-updates").replaceChildren(el("p", "update-ok", "✓ Keine Treiber-Updates gefunden. Alles ist aktuell."));
+    return;
+  }
+
+  const wrap = el("div", "update-list");
+  res.list.forEach((u) => {
+    const row = el("div", "update-row");
+    const info = el("div");
+    info.append(el("strong", null, u.title ?? "Treiber-Update"), el("div", "muted", [u.maker, u.model].filter(Boolean).join(" · ") || "—"));
+    row.append(info, el("span", "mono muted", u.version ?? ""));
+    wrap.append(row);
+  });
+  const note = el("p", "muted update-note", `${res.list.length} Update(s) verfügbar. Die Installation läuft über Windows Update.`);
+  const action = el("button", "btn btn--primary btn--small", "In Windows Update installieren");
+  action.dataset.open = "ms-settings:windowsupdate-optionalupdates";
+  $("drv-updates").replaceChildren(wrap, note, action);
+}
+
+$("drv-refresh").addEventListener("click", loadDrivers);
+$("drv-check").addEventListener("click", checkDriverUpdates);
+
+// Links öffnen (nur erlaubte Ziele, die der Hauptprozess prüft)
+document.addEventListener("click", async (e) => {
+  const target = e.target.closest("[data-open]");
+  if (!target) return;
+  const ok = await api.drivers.open(target.dataset.open);
+  if (!ok) toast("Dieser Link ist nicht erlaubt");
+});
+
+// =====================================================================
+// Speicher aufräumen
+// =====================================================================
+const CAT_COLORS = {
+  Bilder: "#5ec8ff", Videos: "#a42e7b", Musik: "#ffd25a", Dokumente: "#7fd1ae",
+  Archive: "#ffb547", Programme: "#f06a2a", Andere: "#8c98ab",
+};
+const MODE_HINT = {
+  duplicates: "Gleiche Dateien an mehreren Orten. Das älteste Exemplar bleibt erhalten und ist nicht auswählbar, die Kopien sind vorausgewählt.",
+  old: "Dateien, die seit der gewählten Zeit nicht geöffnet oder geändert wurden. Nichts ist vorausgewählt, du entscheidest.",
+  installers: "Installationsdateien (.exe, .msi). Oft liegen dort alte Installer, die nicht mehr gebraucht werden. Nichts ist vorausgewählt.",
+};
+
+const clean = { mode: "duplicates", folders: new Set(), result: null, selected: new Set(), scanning: false };
+
+function renderCleanChips(list) {
+  const wrap = $("clean-folders");
+  wrap.replaceChildren(...list.map((f) => {
+    const b = el("button", "chip-toggle", f.label);
+    b.dataset.key = f.key;
+    b.classList.toggle("on", clean.folders.has(f.key));
+    b.addEventListener("click", () => {
+      if (clean.folders.has(f.key)) clean.folders.delete(f.key); else clean.folders.add(f.key);
+      b.classList.toggle("on", clean.folders.has(f.key));
+    });
+    return b;
+  }));
+}
+
+async function initClean() {
+  const list = await api.clean.folders();
+  list.forEach((f) => { if (["downloads", "desktop", "documents"].includes(f.key)) clean.folders.add(f.key); });
+  renderCleanChips(list);
+  setCleanMode("duplicates");
+  api.clean.onProgress((d) => {
+    $("clean-phase").textContent = d.phase;
+    $("clean-sub").textContent = `${d.scanned.toLocaleString("de-DE")} Dateien geprüft${d.folder ? " · " + d.folder : ""}`;
+  });
+}
+
+function setCleanMode(mode) {
+  clean.mode = mode;
+  document.querySelectorAll("#clean-modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  $("clean-hint").textContent = MODE_HINT[mode];
+  $("clean-days-wrap").classList.toggle("hidden", mode !== "old");
+}
+document.querySelectorAll("#clean-modes button").forEach((b) => b.addEventListener("click", () => setCleanMode(b.dataset.mode)));
+
+function setScanning(on) {
+  clean.scanning = on;
+  $("clean-start").textContent = on ? "Abbrechen" : "Scan starten";
+  $("clean-start").className = on ? "btn btn--ghost scan-btn" : "btn btn--primary scan-btn";
+  $("clean-radar").classList.toggle("spin", on);
+}
+
+async function startCleanScan() {
+  if (clean.scanning) {
+    $("clean-phase").textContent = "Wird abgebrochen …";
+    await api.clean.cancel();
+    return;
+  }
+  if (!clean.folders.size) {
+    toast("Wähle mindestens einen Ordner aus");
+    return;
+  }
+  setScanning(true);
+  $("clean-phase").textContent = "Scan läuft";
+  $("clean-sub").textContent = "Das kann bei vielen Dateien einige Minuten dauern.";
+  $("clean-results").classList.add("hidden");
+  const res = await api.clean.scan({
+    mode: clean.mode,
+    folders: [...clean.folders],
+    minMB: Number($("clean-min").value),
+    days: Number($("clean-days").value),
+  });
+  setScanning(false);
+  $("clean-radar").classList.remove("spin");
+
+  if (!res.ok) {
+    $("clean-phase").textContent = "Fehler";
+    $("clean-sub").textContent = res.error;
+    return;
+  }
+  if (res.cancelled) {
+    $("clean-phase").textContent = "Abgebrochen";
+    $("clean-sub").textContent = "Der Scan wurde gestoppt.";
+    return;
+  }
+  clean.result = res;
+  // Nur bei Doppelten sind Kopien vorausgewählt, bei den anderen Modi entscheidet der Benutzer
+  clean.selected = new Set(res.mode === "duplicates" ? res.items.filter((i) => !i.keep).map((i) => i.path) : []);
+  $("clean-phase").textContent = res.items.length ? "Fertig" : "Nichts gefunden";
+  $("clean-sub").textContent = `${res.scanned.toLocaleString("de-DE")} Dateien geprüft`;
+  renderCleanResults();
+}
+
+// Überflüssiger Speicher je Modus
+function reclaimable(res) {
+  if (res.mode === "duplicates") return res.groups.reduce((sum, g) => sum + g.wasted, 0);
+  return res.items.reduce((sum, i) => sum + i.size, 0);
+}
+
+function renderCleanResults() {
+  const res = clean.result;
+  if (!res) return;
+  $("clean-stats").classList.remove("hidden");
+  $("clean-results").classList.remove("hidden");
+
+  $("cs-found").textContent = fmtBytes(reclaimable(res));
+  $("cs-count").textContent = res.mode === "duplicates"
+    ? `${res.groups.length} Gruppen · ${res.items.length} Dateien`
+    : `${res.items.length} Dateien`;
+  updateCleanSelection();
+  renderDonut(res.items);
+
+  const list = $("clean-list");
+  if (!res.items.length) {
+    list.replaceChildren(el("p", "clean-empty", "Hier ist nichts zu holen. Dein Speicher ist sauber."));
+    return;
+  }
+
+  const makeRow = (f) => {
+    const row = el("label", `clean-row${f.keep ? " is-keep" : ""}`);
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = clean.selected.has(f.path);
+    box.disabled = Boolean(f.keep);
+    box.addEventListener("change", () => {
+      if (box.checked) clean.selected.add(f.path); else clean.selected.delete(f.path);
+      updateCleanSelection();
+    });
+    const info = el("div", "clean-info");
+    info.append(el("strong", null, f.name), el("span", "muted clean-path", f.dir));
+    const cat = el("span", "cat", f.cat);
+    cat.style.setProperty("--c", CAT_COLORS[f.cat] ?? CAT_COLORS.Andere);
+    const meta = el("div", "clean-meta");
+    meta.append(cat, el("span", "mono", fmtBytes(f.size)), el("span", "muted", new Date(f.mtime).toLocaleDateString("de-DE")));
+    if (f.keep) meta.append(el("span", "keep-badge", "Original"));
+    row.append(box, info, meta);
+    return row;
+  };
+
+  if (res.mode === "duplicates") {
+    list.replaceChildren(...res.groups.map((g) => {
+      const wrap = el("div", "dup-group");
+      wrap.append(el("div", "dup-head", `${g.count} identische Dateien · je ${fmtBytes(g.size)} · ${fmtBytes(g.wasted)} überflüssig`));
+      g.files.forEach((f) => wrap.append(makeRow(f)));
+      return wrap;
+    }));
+  } else {
+    list.replaceChildren(...res.items.map(makeRow));
+  }
+}
+
+function renderDonut(items) {
+  const totals = {};
+  let sum = 0;
+  items.forEach((i) => { totals[i.cat] = (totals[i.cat] ?? 0) + i.size; sum += i.size; });
+  const entries = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  let acc = 0;
+  const stops = entries.map(([cat, v]) => {
+    const from = (acc / (sum || 1)) * 100;
+    acc += v;
+    const to = (acc / (sum || 1)) * 100;
+    return `${CAT_COLORS[cat] ?? CAT_COLORS.Andere} ${from}% ${to}%`;
+  });
+  $("clean-donut").style.background = sum
+    ? `conic-gradient(${stops.join(", ")})`
+    : "conic-gradient(rgba(232,238,245,0.08) 0 100%)";
+  $("clean-legend").replaceChildren(...entries.map(([cat, v]) => {
+    const li = el("li");
+    const dot = el("span", "dot");
+    dot.style.background = CAT_COLORS[cat] ?? CAT_COLORS.Andere;
+    li.append(dot, el("span", null, cat), el("span", "muted", fmtBytes(v)));
+    return li;
+  }));
+}
+
+function updateCleanSelection() {
+  const res = clean.result;
+  const bytes = res ? res.items.filter((i) => clean.selected.has(i.path)).reduce((s, i) => s + i.size, 0) : 0;
+  $("cs-sel").textContent = fmtBytes(bytes);
+  $("cs-sel-count").textContent = `${clean.selected.size} Datei(en)`;
+  const btn = $("clean-trash");
+  btn.disabled = clean.selected.size === 0;
+  btn.textContent = clean.selected.size ? `${clean.selected.size} in den Papierkorb (${fmtBytes(bytes)})` : "In den Papierkorb";
+}
+
+$("clean-all").addEventListener("click", () => {
+  const res = clean.result;
+  if (!res) return;
+  res.items.filter((i) => !i.keep).forEach((i) => clean.selected.add(i.path));
+  renderCleanResults();
+});
+$("clean-none").addEventListener("click", () => {
+  clean.selected.clear();
+  if (clean.result) renderCleanResults();
+});
+
+$("clean-trash").addEventListener("click", async () => {
+  const paths = [...clean.selected];
+  if (!paths.length) return;
+  const bytes = clean.result.items.filter((i) => clean.selected.has(i.path)).reduce((s, i) => s + i.size, 0);
+  const ok = await confirmDialog({
+    title: `${paths.length} Datei(en) in den Papierkorb?`,
+    text: `Das sind ca. ${fmtBytes(bytes)}. Du kannst sie im Papierkorb jederzeit wiederherstellen.`,
+    ok: "In den Papierkorb",
+    danger: true,
+  });
+  if (!ok) return;
+  $("clean-trash").disabled = true;
+  const res = await api.clean.trash(paths);
+  const failedPaths = new Set(res.failed.map((f) => f.path));
+  const gone = new Set(paths.filter((p) => !failedPaths.has(p)));
+
+  clean.result.items = clean.result.items.filter((i) => !gone.has(i.path));
+  if (clean.result.mode === "duplicates") {
+    clean.result.groups = clean.result.groups
+      .map((g) => ({ ...g, files: g.files.filter((f) => !gone.has(f.path)) }))
+      .map((g) => ({ ...g, count: g.files.length, wasted: g.size * Math.max(0, g.files.length - 1) }))
+      .filter((g) => g.files.length >= 2);
+  }
+  gone.forEach((p) => clean.selected.delete(p));
+  renderCleanResults();
+  toast(`${res.done} verschoben · ${fmtBytes(res.freed)} frei${res.failed.length ? ` · ${res.failed.length} nicht möglich` : ""}`);
+});
+
+$("clean-start").addEventListener("click", startCleanScan);
 
 // Erst starten, wenn auch processes.js und details.js geladen sind
 window.addEventListener("DOMContentLoaded", init);

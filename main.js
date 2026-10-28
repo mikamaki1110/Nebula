@@ -11,10 +11,48 @@ const fs = require("fs");
 const os = require("os");
 const si = require("systeminformation");
 const lhm = require("./lhm");
+const cleaner = require("./cleaner");
 
 let win = null;
 let tray = null;
 let isQuitting = false;
+
+// =====================================================================
+// Debug-Protokoll: Ringpuffer mit Ereignissen + Zeitmessung der Abfragen
+// =====================================================================
+const LOG_MAX = 400;
+const debugLog = [];
+const timings = {};
+let lastLhmState = null;
+
+function dlog(level, source, message) {
+  debugLog.push({ time: new Date().toISOString(), level, source, message: String(message) });
+  if (debugLog.length > LOG_MAX) debugLog.splice(0, debugLog.length - LOG_MAX);
+}
+
+// Misst die Dauer einer Abfrage; Fehler landen im Protokoll und werden weitergereicht
+async function timed(name, fn) {
+  const started = Date.now();
+  try {
+    const result = await fn();
+    timings[name] = { ms: Date.now() - started, at: new Date().toISOString(), ok: true };
+    return result;
+  } catch (err) {
+    timings[name] = { ms: Date.now() - started, at: new Date().toISOString(), ok: false, error: err.message };
+    dlog("error", name, err.message);
+    throw err;
+  }
+}
+
+// Protokolliert nur Zustandswechsel des Sensor-Dienstes (sonst würde jede Sekunde geschrieben)
+function noteLhm(value, reason) {
+  const state = value ? "verbunden" : "nicht erreichbar";
+  if (state !== lastLhmState) {
+    dlog(value ? "info" : "warn", "Sensoren", value ? "Sensor-Dienst antwortet" : `Sensor-Dienst: ${reason}`);
+    lastLhmState = state;
+  }
+  return value;
+}
 
 // ---------- Nur eine Instanz erlauben ----------
 if (!app.requestSingleInstanceLock()) {
@@ -205,7 +243,7 @@ const UNITS = {
 async function readLhm(port) {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/data.json`, { signal: AbortSignal.timeout(1500) });
-    if (!res.ok) return null;
+    if (!res.ok) return noteLhm(null, `HTTP ${res.status}`);
     const root = await res.json();
 
     // Baum: Ebene 0 = Wurzel, 1 = PC, 2 = Hardware, darunter Gruppen & Sensoren
@@ -253,6 +291,7 @@ async function readLhm(port) {
     const gpuTemps = sensors.filter((s) => isGpu(s) && isTemp(s));
     const gpuLoads = sensors.filter((s) => isGpu(s) && (s.type === "Load" || /load/i.test(s.group)));
 
+    noteLhm(true);
     return {
       cpuTemp: pick(cpuTemps, /package/i, /tctl|tdie/i, /^core \(tctl/i, /^cpu/i),
       gpuTemp: gpuTemps.length ? pick(gpuTemps, /^gpu core$/i, /core/i, /^gpu/i) : null,
@@ -260,8 +299,8 @@ async function readLhm(port) {
       gpuLoad: gpuLoads.find((s) => /^(gpu core|d3d 3d|gpu)$/i.test(s.name))?.value ?? null,
       sensors,
     };
-  } catch {
-    return null;
+  } catch (err) {
+    return noteLhm(null, err.cause?.code || err.message);
   }
 }
 
@@ -347,6 +386,7 @@ async function liveProcesses() {
         source = "Windows-Leistungsindikatoren";
       } catch (err) {
         console.error("Leistungsindikatoren:", err.message);
+        dlog("warn", "Prozesse", `Leistungsindikatoren fehlgeschlagen, nutze systeminformation: ${err.message}`);
       }
     }
 
@@ -572,6 +612,65 @@ function createTray() {
 }
 
 // =====================================================================
+// Treiber: installierte Treiber (WMI) und verfügbare Updates (Windows Update)
+// =====================================================================
+const DRIVER_SCRIPT = `
+$ErrorActionPreference = 'SilentlyContinue'
+$classes = @('DISPLAY','NET','MEDIA','HDC','SCSIAdapter','BLUETOOTH')
+$drivers = Get-CimInstance Win32_PnPSignedDriver | Where-Object {
+  $_.DeviceName -and (($classes -contains $_.DeviceClass) -or ($_.DeviceClass -eq 'SYSTEM' -and $_.DeviceName -match 'chipset|management engine|smbus|pci express root'))
+}
+$out = foreach ($d in $drivers) {
+  [pscustomobject]@{
+    n = $d.DeviceName
+    c = $d.DeviceClass
+    v = $d.DriverVersion
+    d = if ($d.DriverDate) { $d.DriverDate.ToString('yyyy-MM-dd') } else { $null }
+    m = $d.Manufacturer
+  }
+}
+ConvertTo-Json -InputObject @($out) -Compress
+`;
+
+const DRIVER_UPDATE_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+$session = New-Object -ComObject Microsoft.Update.Session
+$result = $session.CreateUpdateSearcher().Search("IsInstalled=0 and Type='Driver' and IsHidden=0")
+$out = foreach ($u in $result.Updates) {
+  [pscustomobject]@{
+    t = $u.Title
+    m = $u.DriverManufacturer
+    mo = $u.DriverModel
+    c = $u.DriverClass
+    v = $u.DriverVersion
+    d = if ($u.LastDeploymentChangeTime) { $u.LastDeploymentChangeTime.ToString('yyyy-MM-dd') } else { $null }
+  }
+}
+ConvertTo-Json -InputObject @($out) -Compress
+`;
+
+// Nur diese Ziele dürfen aus der Oberfläche heraus geöffnet werden
+const ALLOWED_HOSTS = ["nvidia.com", "amd.com", "intel.com", "support.microsoft.com"];
+function openAllowed(target) {
+  if (target === "ms-settings:windowsupdate" || target === "ms-settings:windowsupdate-optionalupdates") {
+    return shell.openExternal(target).then(() => true);
+  }
+  try {
+    const url = new URL(target);
+    const ok = url.protocol === "https:" && ALLOWED_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith(`.${h}`));
+    if (!ok) return false;
+    return shell.openExternal(url.href).then(() => true);
+  } catch {
+    return false;
+  }
+}
+
+function asList(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+// =====================================================================
 // IPC
 // =====================================================================
 function registerIpc() {
@@ -579,9 +678,100 @@ function registerIpc() {
   ipcMain.on("window:maximize", () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   ipcMain.on("window:close", () => win.close());
 
-  ipcMain.handle("hw:static", (_e, refresh) => loadStaticInfo(Boolean(refresh)));
-  ipcMain.handle("hw:fast", () => liveFast());
-  ipcMain.handle("hw:slow", () => liveSlow());
+  ipcMain.handle("hw:static", (_e, refresh) => timed("hw:static", () => loadStaticInfo(Boolean(refresh))));
+  ipcMain.handle("hw:fast", () => timed("hw:fast", () => liveFast()));
+  ipcMain.handle("hw:slow", () => timed("hw:slow", () => liveSlow()));
+
+  // ---------- Speicher aufräumen ----------
+  let cleanBusy = false;
+  let cleanCancel = false;
+  ipcMain.handle("clean:folders", () => cleaner.folderList().map((f) => ({ key: f.key, label: f.label })));
+  ipcMain.handle("clean:cancel", () => { cleanCancel = true; return true; });
+  ipcMain.handle("clean:scan", async (_e, opts) => {
+    if (cleanBusy) return { ok: false, error: "Ein Scan läuft bereits." };
+    cleanBusy = true;
+    cleanCancel = false;
+    try {
+      const progress = (data) => win?.webContents.send("clean:progress", data);
+      const result = await cleaner.scan(opts ?? {}, progress, () => cleanCancel);
+      dlog("info", "Speicher", `Scan (${opts?.mode ?? "?"}): ${result.items?.length ?? 0} Dateien, ${result.scanned} geprüft`);
+      return { ok: true, ...result };
+    } catch (err) {
+      dlog("error", "Speicher", `Scan fehlgeschlagen: ${err.message}`);
+      return { ok: false, error: err.message };
+    } finally {
+      cleanBusy = false;
+    }
+  });
+  ipcMain.handle("clean:trash", async (_e, paths) => {
+    const result = await cleaner.trash(Array.isArray(paths) ? paths : []);
+    dlog(result.failed.length ? "warn" : "info", "Speicher", `${result.done} Datei(en) in den Papierkorb, ${result.failed.length} fehlgeschlagen`);
+    return result;
+  });
+
+  // ---------- Treiber ----------
+  ipcMain.handle("drivers:list", async () => {
+    if (process.platform !== "win32") return { ok: false, error: "Die Treiberliste funktioniert nur unter Windows.", list: [] };
+    try {
+      const list = asList(JSON.parse(await lhm.powershell(DRIVER_SCRIPT, 60000))).map((d) => ({
+        name: d.n, cls: d.c, version: d.v, date: d.d, maker: d.m,
+      }));
+      dlog("info", "Treiber", `${list.length} Treiber gelesen`);
+      return { ok: true, list };
+    } catch (err) {
+      dlog("error", "Treiber", `Liste fehlgeschlagen: ${err.message}`);
+      return { ok: false, error: err.message, list: [] };
+    }
+  });
+
+  ipcMain.handle("drivers:updates", async () => {
+    if (process.platform !== "win32") return { ok: false, error: "Nur unter Windows verfügbar.", list: [] };
+    try {
+      const list = asList(JSON.parse(await lhm.powershell(DRIVER_UPDATE_SCRIPT, 180000))).map((u) => ({
+        title: u.t, maker: u.m, model: u.mo, cls: u.c, version: u.v, date: u.d,
+      }));
+      dlog("info", "Treiber", `Suche nach Updates: ${list.length} gefunden`);
+      return { ok: true, list };
+    } catch (err) {
+      dlog("error", "Treiber", `Update-Suche fehlgeschlagen: ${err.message}`);
+      return { ok: false, error: err.message, list: [] };
+    }
+  });
+
+  ipcMain.handle("drivers:open", (_e, target) => openAllowed(String(target ?? "")));
+
+  // ---------- Debug-Ansicht ----------
+  ipcMain.handle("debug:info", () => ({
+    app: {
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: `${process.platform} ${os.release()} (${process.arch})`,
+      pid: process.pid,
+      uptime: Math.round(process.uptime()),
+      memory: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    },
+    paths: {
+      userData: app.getPath("userData"),
+      sensors: path.join(app.getPath("userData"), "LibreHardwareMonitor"),
+      port: store?.settings?.lhmPort ?? 8085,
+    },
+    timings,
+    lhmConnected: lastLhmState === "verbunden",
+    procsCount: lastProcs?.processCount ?? null,
+    procsSource: lastProcs?.source ?? null,
+    log: debugLog.slice(-LOG_MAX).reverse(),
+  }));
+  ipcMain.handle("debug:clear", () => {
+    debugLog.length = 0;
+    return true;
+  });
+  ipcMain.handle("debug:copy", (_e, text) => {
+    clipboard.writeText(String(text ?? ""));
+    return true;
+  });
 
   ipcMain.handle("report:copy", () => {
     clipboard.writeText(buildReport());
@@ -600,9 +790,12 @@ function registerIpc() {
     return true;
   });
 
-  ipcMain.handle("hw:procs", () => liveProcesses());
+  ipcMain.handle("hw:procs", () => timed("hw:procs", () => liveProcesses()));
   ipcMain.handle("proc:kill", async (_e, pids, elevated) => {
     const result = await killProcesses(Array.isArray(pids) ? pids : [], Boolean(elevated));
+    dlog(result.ok ? "info" : "error", "Prozess beenden", result.ok
+      ? `${Array.isArray(pids) ? pids.length : 0} Prozess(e) beendet${elevated ? " (mit Admin-Rechten)" : ""}`
+      : `Fehlgeschlagen: ${result.error ?? "unbekannt"}`);
     if (result.ok) await new Promise((r) => setTimeout(r, 400));
     return result;
   });
@@ -619,8 +812,12 @@ function registerIpc() {
     if (setupRunning) return { ok: false, error: "Die Einrichtung läuft bereits." };
     setupRunning = true;
     const port = store.settings.lhmPort || 8085;
-    const progress = (step, message) => win?.webContents.send("lhm:progress", { step, message });
+    const progress = (step, message) => {
+      dlog(step === "error" ? "error" : "info", "Einrichtung", message);
+      win?.webContents.send("lhm:progress", { step, message });
+    };
     try {
+      dlog("info", "Einrichtung", "Sensor-Dienst wird eingerichtet");
       await lhm.setup(port, progress);
       // bis zu 2 Minuten warten, bis der Webserver antwortet (PawnIO-Abfrage beim ersten Start)
       for (let i = 0; i < 60; i++) {
