@@ -28,7 +28,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0build\fetch-sensors.ps
 if errorlevel 1 goto fehler
 
 echo.
-echo  [3/3] Baue Installer und portable EXE...
+echo  [3/3] Baue ATLAS, Installer und portable EXE...
 call npm run dist
 if errorlevel 1 goto fehler
 
@@ -36,8 +36,8 @@ echo.
 echo  ===========================================
 echo   FERTIG! Der Ordner "dist" wird geoeffnet.
 echo  ===========================================
-echo   Nebula-Setup-1.5.0.exe    = Installer
-echo   Nebula-Portable-1.5.0.exe = Portable Version
+echo   Nebula-Setup-1.7.4.exe    = Installer
+echo   Nebula-Portable-1.7.4.exe = Portable Version
 echo.
 start "" "%~dp0dist"
 pause

@@ -1,0 +1,28 @@
+# Cloudflare Worker für den Gratis-KI-Zugang von Nebula/ATLAS.
+# Einrichtung: siehe ANLEITUNG.md in diesem Ordner.
+name = "nebula-ki-proxy"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+[vars]
+# Welches Modell deine Nutzer gratis bekommen. Haiku ist am günstigsten.
+MODEL = "claude-haiku-5-5"
+# Maximale Antwortlänge pro Anfrage
+MAX_TOKENS = "2048"
+
+# Ratenbegrenzung pro Installation: höchstens 30 KI-Anfragen pro Minute
+# (eine ATLAS-Aufgabe braucht oft 3–10 Anfragen)
+[[ratelimits]]
+name = "LIMIT_INSTALL"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 30
+  period = 60
+
+# Ratenbegrenzung pro IP-Adresse: höchstens 60 Anfragen pro Minute
+[[ratelimits]]
+name = "LIMIT_IP"
+namespace_id = "1002"
+  [ratelimits.simple]
+  limit = 60
+  period = 60

@@ -1,23 +1,42 @@
 {
   "name": "nebula-desktop",
   "productName": "Nebula",
-  "version": "1.5.0",
-  "description": "Hardware-Monitor für Windows: Temperaturen, Auslastung, Prozesse und alle Bauteile deines PCs",
+  "version": "1.7.4",
+  "description": "Hardware-Monitor für Windows mit ATLAS, der KI-Zentrale: Temperaturen, Auslastung, Prozesse, Sicherheit, Reparatur und Aufräumen",
   "main": "main.js",
   "author": "Nebula",
   "license": "MIT",
   "scripts": {
-    "start": "electron .",
-    "dist": "electron-builder --win",
-    "sensors": "powershell -NoProfile -ExecutionPolicy Bypass -File build/fetch-sensors.ps1"
+    "start": "npm run build:atlas && electron .",
+    "start:fast": "electron .",
+    "build:atlas": "electron-vite build --config atlas/electron.vite.config.ts",
+    "dist": "npm run build:atlas && electron-builder --win",
+    "sensors": "powershell -NoProfile -ExecutionPolicy Bypass -File build/fetch-sensors.ps1",
+    "test:atlas": "vitest run --config atlas/vitest.config.ts",
+    "typecheck:atlas": "tsc --noEmit -p atlas/tsconfig.node.json && tsc --noEmit -p atlas/tsconfig.web.json"
   },
   "dependencies": {
     "electron-updater": "^6.3.0",
-    "systeminformation": "^5.25.0"
+    "sql.js": "^1.11.0",
+    "systeminformation": "^5.25.0",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.5"
   },
   "devDependencies": {
+    "@fontsource-variable/instrument-sans": "^5.1.0",
+    "@types/node": "^20.17.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/sql.js": "^1.4.9",
+    "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron-builder": "^25.0.0",
+    "electron-vite": "^2.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
   },
   "build": {
     "appId": "com.nebula.desktop",
@@ -29,9 +48,11 @@
       "main.js",
       "lhm.js",
       "cleaner.js",
+      "updater.js",
       "preload.js",
       "renderer/**/*",
-      "assets/**/*"
+      "assets/**/*",
+      "atlas/out/**/*"
     ],
     "win": {
       "target": [

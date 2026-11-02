@@ -4,6 +4,16 @@
 const $ = (id) => document.getElementById(id);
 const api = window.nebula;
 
+// Ist das Fenster nicht zu sehen (im Tray, minimiert oder von einer anderen App verdeckt), wird nur jede n-te
+// Messung ausgeführt: Andere Programme haben Vorrang. Temperaturen werden weiter geprüft, damit die Hitze-Warnung wirkt.
+function throttled(fn, backgroundEvery) {
+  let n = 0;
+  return () => {
+    if (document.hidden && settings.yieldToApps !== false && ++n % backgroundEvery !== 0) return undefined;
+    return fn();
+  };
+}
+
 const FAST_MS = 1500;
 const SLOW_MS = 4000;
 const RING = 2 * Math.PI * 52;
@@ -265,15 +275,15 @@ $("wc-max").addEventListener("click", api.window.maximize);
 $("wc-close").addEventListener("click", api.window.close);
 
 let currentView = "dashboard";
-function showView(name) {
+function showView(name, focus = true) {
   currentView = name;
   const navName = name === "detail" ? "dashboard" : name;
   document.querySelectorAll(".nav").forEach((b) => b.classList.toggle("active", b.dataset.view === navName));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
   document.querySelector(".content").scrollTop = 0;
   if (name !== "detail") window.Details?.close();
-  if (name === "notes") $("notes").focus();
-  if (name === "processes") $("proc-search").focus();
+  if (focus && name === "notes") $("notes").focus();
+  if (focus && name === "processes") $("proc-search").focus();
   requestAnimationFrame(redrawCharts);
   if (name === "debug") renderDebug();
   if (name === "treiber" && !driversLoaded) loadDrivers();
@@ -902,30 +912,35 @@ async function init() {
   $("notes-count").textContent = `${$("notes").value.length} Zeichen`;
   $("s-top").checked = Boolean(settings.alwaysOnTop);
   $("s-tray").checked = settings.minimizeToTray !== false;
+  $("s-yield").checked = settings.yieldToApps !== false;
   $("s-auto").checked = await api.store.getAutostart();
   $("s-port").value = settings.lhmPort ?? 8085;
+  $("s-alert").checked = settings.alertOn !== false;
+  $("s-alert-temp").value = String(settings.alertTemp ?? 90);
 
   bindSwitch("s-top", "alwaysOnTop", "Immer im Vordergrund");
   bindSwitch("s-tray", "minimizeToTray", "In Tray minimieren");
+  bindSwitch("s-yield", "yieldToApps", "Anderen Programmen den Vortritt lassen");
   bindSwitch("s-auto", "autostart", "Autostart");
+  bindSwitch("s-alert", "alertOn", "Hitze-Warnung");
 
   tickClock();
   setInterval(tickClock, 10_000);
 
   updateFast();
-  setInterval(updateFast, FAST_MS);
+  setInterval(throttled(updateFast, 4), FAST_MS);
 
   updateProcs();
-  setInterval(updateProcs, 4000);
+  setInterval(throttled(updateProcs, 15), 4000);
 
   await loadHardware();
   await updateSlow();
-  setInterval(updateSlow, SLOW_MS);
+  setInterval(throttled(updateSlow, 3), SLOW_MS);
 
   refreshSensorStatus();
   setInterval(refreshSensorStatus, 20000);
 
-  setInterval(renderDebug, 2000);
+  setInterval(throttled(renderDebug, 30), 2000);
 }
 
 // =====================================================================
@@ -1391,3 +1406,123 @@ $("clean-start").addEventListener("click", startCleanScan);
 
 // Erst starten, wenn auch processes.js und details.js geladen sind
 window.addEventListener("DOMContentLoaded", init);
+
+// =====================================================================
+// Systemcheck: fasst die wichtigsten Werte zu verständlichen Hinweisen zusammen
+// =====================================================================
+function healthRow(label, state, text, action) {
+  const row = el("div", "hrow");
+  row.dataset.state = state;
+  row.append(el("span", "hdot"), el("span", "hrow__label", label));
+  if (action) {
+    const b = el("button", "btn btn--ghost btn--small", action.label);
+    b.dataset.goto = action.goto;
+    row.append(b);
+  }
+  row.append(el("span", "hrow__text", text));
+  return row;
+}
+
+function renderHealth() {
+  if (!slow && !fast) return;
+  const rows = [];
+
+  const ct = slow?.cpuTemp ?? null;
+  const cs = tempState(ct);
+  rows.push(cs === "na"
+    ? healthRow("Prozessor", "na", "Nicht gemessen. Der Sensor-Dienst liefert die Temperatur.", { label: "Einrichten", goto: "sensors" })
+    : healthRow("Prozessor", cs, `${Math.round(ct)} °C · ${cs === "cool" ? "kühl" : cs === "warm" ? "warm, Lüfter prüfen" : "zu heiß, Last reduzieren"}`));
+
+  const gt = slow?.gpus?.[0]?.temp ?? null;
+  const gs = tempState(gt);
+  if (slow?.gpus?.[0]) {
+    rows.push(gs === "na"
+      ? healthRow("Grafikkarte", "na", "Keine Temperatur gemessen.")
+      : healthRow("Grafikkarte", gs, `${Math.round(gt)} °C · ${gs === "cool" ? "kühl" : gs === "warm" ? "warm" : "zu heiß"}`));
+  }
+
+  const v = systemVolume();
+  if (v) {
+    const free = v.size - v.used;
+    const freePct = v.size ? (free / v.size) * 100 : 100;
+    const ds = freePct < 5 ? "hot" : freePct < 15 ? "warm" : "cool";
+    rows.push(healthRow("Systemlaufwerk", ds, `${fmtBytes(free)} frei (${Math.round(freePct)} %)`,
+      ds === "cool" ? null : { label: "Aufräumen", goto: "speicher" }));
+  }
+
+  if (fast) {
+    const rs = fast.ramPercent >= 90 ? "hot" : fast.ramPercent >= 75 ? "warm" : "cool";
+    rows.push(healthRow("Arbeitsspeicher", rs, `${fast.ramPercent} % belegt`));
+  }
+
+  if (slow?.lhm) {
+    rows.push(slow.lhm.connected
+      ? healthRow("Sensor-Dienst", "cool", "Läuft und liefert Werte.")
+      : healthRow("Sensor-Dienst", "warm", "Nicht verbunden. Ohne ihn fehlen Temperaturen.", { label: "Einrichten", goto: "sensors" }));
+  }
+
+  const attention = rows.filter((r) => r.dataset.state === "warm" || r.dataset.state === "hot").length;
+  $("health-summary").textContent = attention
+    ? `${attention} ${attention === 1 ? "Hinweis" : "Hinweise"}`
+    : "Alles in Ordnung";
+  $("health").replaceChildren(...rows);
+}
+
+// =====================================================================
+// Hitze-Warnung: nur bei anhaltender Hitze, höchstens alle 10 Minuten
+// =====================================================================
+let heatSince = 0;
+let lastHeatAlert = 0;
+
+function notify(title, body) {
+  toast(body);
+  try {
+    if (Notification.permission === "granted") {
+      new Notification(title, { body });
+    } else if (Notification.permission !== "denied") {
+      Notification.requestPermission().then((p) => { if (p === "granted") new Notification(title, { body }); });
+    }
+  } catch { /* Benachrichtigungen sind optional */ }
+}
+
+function checkHeatAlert() {
+  if (settings.alertOn === false || !slow) return;
+  const limit = Number(settings.alertTemp) || 90;
+  const hot = [["CPU", slow.cpuTemp], ["GPU", slow.gpus?.[0]?.temp]]
+    .filter(([, t]) => t != null && t >= limit)
+    .sort((a, b) => b[1] - a[1]);
+  if (!hot.length) { heatSince = 0; return; }
+  heatSince = heatSince || Date.now();
+  // 12 Sekunden anhaltend zu heiß, bevor gewarnt wird – nach echter Zeit, damit es auch bei seltener Messung im Hintergrund stimmt
+  if (Date.now() - heatSince < 12_000 || Date.now() - lastHeatAlert < 10 * 60000) return;
+  lastHeatAlert = Date.now();
+  const [part, t] = hot[0];
+  notify("Nebula · Hitze-Warnung", `${part} hat ${Math.round(t)} °C erreicht (Grenze ${limit} °C).`);
+}
+
+// Hook: nach jedem Abruf der Temperaturen
+const _renderTempsBase = renderTemps;
+renderTemps = function () {
+  _renderTempsBase();
+  checkHeatAlert();
+  renderHealth();
+};
+
+// =====================================================================
+// Tasten 1–9: Ansichten wechseln (nicht beim Schreiben in Felder)
+// =====================================================================
+const VIEW_KEYS = ["dashboard", "processes", "hardware", "sensors", "treiber", "speicher", "notes", "debug", "settings"];
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
+  if (!$("modal").classList.contains("hidden")) return;
+  const n = Number(e.key);
+  if (n >= 1 && n <= VIEW_KEYS.length) showView(VIEW_KEYS[n - 1], false);
+});
+
+// Einstellungen für die Hitze-Warnung
+$("s-alert-temp").addEventListener("change", async (e) => {
+  await api.store.saveSettings({ alertTemp: Number(e.target.value) });
+  toast(`Warnung ab ${e.target.value} °C`);
+});

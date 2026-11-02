@@ -50,4 +50,14 @@ contextBridge.exposeInMainWorld("nebula", {
     saveSettings: (s) => ipcRenderer.invoke("settings:save", s),
     getAutostart: () => ipcRenderer.invoke("settings:autostart"),
   },
+  update: {
+    get: () => ipcRenderer.invoke("update:get"),
+    check: () => ipcRenderer.invoke("update:check"),
+    download: () => ipcRenderer.invoke("update:download"),
+    install: () => ipcRenderer.invoke("update:install"),
+    onState: (cb) => ipcRenderer.on("update:state", (_e, state) => cb(state)),
+  },
+  atlas: {
+    open: () => ipcRenderer.invoke("nebula:open-atlas"),
+  },
 });

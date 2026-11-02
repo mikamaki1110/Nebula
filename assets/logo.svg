@@ -1,22 +1,54 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <radialGradient id="nb-core" cx="50%" cy="45%" r="55%">
-      <stop offset="0" stop-color="#FFF4C8" />
-      <stop offset="0.45" stop-color="#FFD25A" />
-      <stop offset="1" stop-color="#F06A2A" />
-    </radialGradient>
+    <linearGradient id="nb-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1e26"/>
+      <stop offset="1" stop-color="#07080b"/>
+    </linearGradient>
+    <filter id="nb-inner" x="-10%" y="-10%" width="120%" height="120%">
+      <feOffset dx="0" dy="5" in="SourceAlpha" result="off"/>
+      <feGaussianBlur in="off" stdDeviation="9" result="blur"/>
+      <feComposite in="SourceAlpha" in2="blur" operator="out" result="edge"/>
+      <feFlood flood-color="#000" flood-opacity="0.8"/>
+      <feComposite in2="edge" operator="in" result="shadow"/>
+      <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="shadow"/></feMerge>
+    </filter>
+    <!-- kleiner Schatten je Kachel: sie liegen auf dem Gehäuse -->
+    <filter id="nb-cell" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity="0.55"/>
+    </filter>
+    <!-- Glut-Schein um die heißesten Kacheln -->
+    <filter id="nb-glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.55"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#f06a2a" flood-opacity="0.7"/>
+    </filter>
   </defs>
-  <!-- Pins -->
-  <g stroke="#E8EEF5" stroke-width="3" stroke-linecap="round">
-    <path d="M24 4.5v6M32 4.5v6M40 4.5v6M24 53.5v6M32 53.5v6M40 53.5v6M4.5 24h6M4.5 32h6M4.5 40h6M53.5 24h6M53.5 32h6M53.5 40h6" />
+
+  <rect width="512" height="512" rx="116" fill="url(#nb-tile)" filter="url(#nb-inner)"/>
+  <g>
+    <rect x="68.0" y="68.0" width="64" height="64" rx="16" fill="#31214f" filter="url(#nb-cell)"/>
+    <rect x="146.0" y="68.0" width="64" height="64" rx="16" fill="#70276d" filter="url(#nb-cell)"/>
+    <rect x="224.0" y="68.0" width="64" height="64" rx="16" fill="#bc4162" filter="url(#nb-cell)"/>
+    <rect x="302.0" y="68.0" width="64" height="64" rx="16" fill="#c2465b" filter="url(#nb-cell)"/>
+    <rect x="380.0" y="68.0" width="64" height="64" rx="16" fill="#862a73" filter="url(#nb-cell)"/>
+    <rect x="68.0" y="146.0" width="64" height="64" rx="16" fill="#3a1f5e" filter="url(#nb-cell)"/>
+    <rect x="146.0" y="146.0" width="64" height="64" rx="16" fill="#c2465b" filter="url(#nb-cell)"/>
+    <rect x="224.0" y="146.0" width="64" height="64" rx="16" fill="#f79a40" filter="url(#nb-glow)"/>
+    <rect x="302.0" y="146.0" width="64" height="64" rx="16" fill="#f9a746" filter="url(#nb-glow)"/>
+    <rect x="380.0" y="146.0" width="64" height="64" rx="16" fill="#d55547" filter="url(#nb-cell)"/>
+    <rect x="68.0" y="224.0" width="64" height="64" rx="16" fill="#442061" filter="url(#nb-cell)"/>
+    <rect x="146.0" y="224.0" width="64" height="64" rx="16" fill="#ce504e" filter="url(#nb-cell)"/>
+    <rect x="224.0" y="224.0" width="64" height="64" rx="16" fill="#fbb34c" filter="url(#nb-glow)"/>
+    <rect x="302.0" y="224.0" width="64" height="64" rx="16" fill="#fdc152" filter="url(#nb-glow)"/>
+    <rect x="380.0" y="224.0" width="64" height="64" rx="16" fill="#e36038" filter="url(#nb-cell)"/>
+    <rect x="68.0" y="302.0" width="64" height="64" rx="16" fill="#352056" filter="url(#nb-cell)"/>
+    <rect x="146.0" y="302.0" width="64" height="64" rx="16" fill="#9f2d7a" filter="url(#nb-cell)"/>
+    <rect x="224.0" y="302.0" width="64" height="64" rx="16" fill="#e36038" filter="url(#nb-cell)"/>
+    <rect x="302.0" y="302.0" width="64" height="64" rx="16" fill="#ea6630" filter="url(#nb-cell)"/>
+    <rect x="380.0" y="302.0" width="64" height="64" rx="16" fill="#b1386e" filter="url(#nb-cell)"/>
+    <rect x="68.0" y="380.0" width="64" height="64" rx="16" fill="#2c2246" filter="url(#nb-cell)"/>
+    <rect x="146.0" y="380.0" width="64" height="64" rx="16" fill="#371f5a" filter="url(#nb-cell)"/>
+    <rect x="224.0" y="380.0" width="64" height="64" rx="16" fill="#69266b" filter="url(#nb-cell)"/>
+    <rect x="302.0" y="380.0" width="64" height="64" rx="16" fill="#70276d" filter="url(#nb-cell)"/>
+    <rect x="380.0" y="380.0" width="64" height="64" rx="16" fill="#3a1f5e" filter="url(#nb-cell)"/>
   </g>
-  <!-- Chip -->
-  <rect x="11" y="11" width="42" height="42" rx="10" fill="#151A22" stroke="#E8EEF5" stroke-width="3" />
-  <!-- Isothermen -->
-  <path d="M33 18.5c8.6 0 13.5 5.6 13.5 12.6S41 45.5 31.6 45.5c-8 0-14.1-5.3-14.1-12.8S24.1 18.5 33 18.5z"
-        fill="none" stroke="#A42E7B" stroke-width="2.6" />
-  <path d="M34.6 23.6c4.9 0 7.9 3.4 7.9 7.3s-3.4 8.6-8.8 8.6c-4.6 0-7.9-3.1-7.9-7.4s3.8-8.5 8.8-8.5z"
-        fill="none" stroke="#F06A2A" stroke-width="2.6" />
-  <!-- Hotspot -->
-  <circle cx="35.4" cy="30.8" r="4.4" fill="url(#nb-core)" />
 </svg>

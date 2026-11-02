@@ -2,7 +2,9 @@
 # "Nebula-Setup-<version>.exe" als öffentliches Release.
 #
 # Starten: Repository → Actions → "Nebula veröffentlichen" → "Run workflow"
-# Neue Version: vorher "version" in package.json erhöhen (z. B. 1.4.0 → 1.5.0)
+# Neue Version: vorher "version" in package.json erhöhen (z. B. 1.6.0 → 1.7.0)
+# WICHTIG: immer in DIESEM Repository veröffentlichen – nur dann finden installierte
+# Versionen (z. B. 1.6) das Update automatisch.
 name: Nebula veröffentlichen
 
 on:
@@ -27,6 +29,9 @@ jobs:
 
       - name: Pakete installieren
         run: npm install --no-audit --no-fund
+
+      - name: ATLAS bauen
+        run: npm run build:atlas
 
       - name: Sensor-Dienst (LibreHardwareMonitor + PawnIO) einpacken
         shell: pwsh

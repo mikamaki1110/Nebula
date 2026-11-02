@@ -12,6 +12,7 @@ const os = require("os");
 const si = require("systeminformation");
 const lhm = require("./lhm");
 const cleaner = require("./cleaner");
+const updater = require("./updater");
 
 let win = null;
 let tray = null;
@@ -64,7 +65,7 @@ if (!app.requestSingleInstanceLock()) {
 // =====================================================================
 // Speicher (Notizen + Einstellungen)
 // =====================================================================
-const DEFAULT_SETTINGS = { accent: 0, alwaysOnTop: false, minimizeToTray: true, lhmPort: 8085 };
+const DEFAULT_SETTINGS = { accent: 0, alwaysOnTop: false, minimizeToTray: true, lhmPort: 8085, yieldToApps: true };
 const storePath = () => path.join(app.getPath("userData"), "nebula-data.json");
 
 function readStore() {
@@ -583,6 +584,28 @@ function createWindow() {
   });
 }
 
+// =====================================================================
+// Anderen Programmen den Vortritt lassen (ab 1.7.3)
+// Nebula, ATLAS und deren Hilfsprozesse laufen mit niedrigerer Priorität: Spiele und andere Programme
+// bekommen die Rechenzeit zuerst, Nebula nimmt sich nur, was übrig ist. Von Nebula gestartete Prozesse
+// (z. B. PowerShell) erben die niedrigere Priorität.
+// =====================================================================
+let appliedPriority = null;
+function applyPriority() {
+  if (process.platform !== "win32") return;
+  const { priority } = os.constants;
+  const wanted = store?.settings?.yieldToApps === false ? priority.PRIORITY_NORMAL : priority.PRIORITY_BELOW_NORMAL;
+  const pids = new Set([process.pid]);
+  try { for (const m of app.getAppMetrics()) pids.add(m.pid); } catch { /* optional */ }
+  for (const pid of pids) {
+    try { os.setPriority(pid, wanted); } catch { /* kein Zugriff auf diesen Prozess */ }
+  }
+  if (appliedPriority !== wanted) {
+    appliedPriority = wanted;
+    dlog("info", "Priorität", wanted === priority.PRIORITY_NORMAL ? "normal" : "niedriger – andere Programme haben Vorrang");
+  }
+}
+
 function showWindow() {
   if (!win) return;
   if (win.isMinimized()) win.restore();
@@ -595,6 +618,36 @@ function toggleWindow() {
   else showWindow();
 }
 
+// =====================================================================
+// ATLAS – KI-Zentrale (ab 1.7). Wird erst beim ersten Öffnen geladen,
+// damit Nebula selbst genauso schnell startet wie bisher.
+// =====================================================================
+async function openAtlas() {
+  try {
+    const atlas = require("./atlas/out/main/index.js");
+    await atlas.openAtlas({
+      icon: fs.existsSync(path.join(__dirname, "assets", "atlas-icon.png"))
+        ? path.join(__dirname, "assets", "atlas-icon.png") // eigenes ATLAS-Symbol
+        : path.join(__dirname, "assets", "icon.png"),
+      log: (level, message) => dlog(level, "ATLAS", message),
+      // ATLAS nutzt Nebulas bewährte Messwerte, statt sie noch einmal zu messen
+      providers: {
+        fast: () => liveFast(),
+        slow: () => liveSlow(),
+        procs: () => liveProcesses(),
+        info: () => loadStaticInfo(),
+      },
+    });
+    setTimeout(applyPriority, 2500); // der ATLAS-Fensterprozess ist neu
+    return { ok: true };
+  } catch (err) {
+    dlog("error", "ATLAS", err.message);
+    return { ok: false, error: /Cannot find module/.test(err.message)
+      ? "ATLAS ist in dieser Version nicht enthalten (atlas/out fehlt – vorher \"npm run build:atlas\" ausführen)."
+      : err.message };
+  }
+}
+
 function createTray() {
   const icon = nativeImage
     .createFromPath(path.join(__dirname, "assets", "icon.png"))
@@ -604,6 +657,7 @@ function createTray() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Nebula öffnen", click: showWindow },
+      { label: "ATLAS öffnen", click: () => { openAtlas(); } },
       { type: "separator" },
       { label: "Beenden", click: () => { isQuitting = true; app.quit(); } },
     ])
@@ -868,11 +922,14 @@ function registerIpc() {
     const { autostart, ...rest } = settings ?? {};
     store.settings = { ...store.settings, ...rest };
     win.setAlwaysOnTop(Boolean(store.settings.alwaysOnTop));
+    applyPriority();
     if (typeof autostart === "boolean") app.setLoginItemSettings({ openAtLogin: autostart });
     return writeStore(store);
   });
 
   ipcMain.handle("settings:autostart", () => app.getLoginItemSettings().openAtLogin);
+
+  ipcMain.handle("nebula:open-atlas", () => openAtlas());
 }
 
 // =====================================================================
@@ -880,6 +937,7 @@ function registerIpc() {
 // =====================================================================
 app.whenReady().then(() => {
   store = readStore();
+  applyPriority(); // zuerst: die gleich gestartete PowerShell erbt die Priorität
 
   // Hält eine PowerShell offen → Hardware-Abfragen unter Windows deutlich schneller
   if (process.platform === "win32" && typeof si.powerShellStart === "function") {
@@ -889,18 +947,19 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
   createTray();
+  // Fenster-, GPU- und ATLAS-Prozesse entstehen erst nach und nach – deshalb regelmäßig nachziehen
+  setTimeout(applyPriority, 3000);
+  setInterval(applyPriority, 60_000);
 
   // Sensor-Dienst im Hintergrund hochfahren, falls er eingerichtet ist
   lhm.ensureRunning();
 
-  // Automatische Updates (nur in der installierten Version):
-  // prüft GitHub Releases, lädt neue Versionen im Hintergrund und installiert sie beim Beenden.
-  if (app.isPackaged) {
-    try {
-      const { autoUpdater } = require("electron-updater");
-      autoUpdater.checkForUpdatesAndNotify().catch(() => { /* offline oder portable Version */ });
-    } catch { /* optional */ }
-  }
+  // Updates (ab 1.7 mit Knopf in der App): prüft GitHub Releases beim Start und alle 4 Stunden.
+  updater.init({
+    getWindow: () => win,
+    log: dlog,
+    beforeInstall: () => { isQuitting = true; },
+  });
   globalShortcut.register("CommandOrControl+Shift+N", toggleWindow);
   app.on("activate", showWindow);
 });

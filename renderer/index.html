@@ -8,36 +8,70 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <svg class="svg-defs" width="0" height="0" aria-hidden="true"><defs><linearGradient id="atlas-logo-grad" x1="0" y1="1" x2="0" y2="0"><stop class="grad-from" offset="0" /><stop class="grad-to" offset="1" /></linearGradient></defs></svg>
   <!-- Wärmebild-Hintergrund (background.js) -->
   <canvas id="bg-canvas" aria-hidden="true"></canvas>
   <div class="vignette" aria-hidden="true"></div>
 
   <!-- ===== Titelleiste ===== -->
   <header class="titlebar">
-    <div class="titlebar__brand"><svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+    <div class="titlebar__brand"><svg class="brand-mark" viewBox="0 0 512 512" aria-hidden="true">
   <defs>
-    <radialGradient id="nb-core-a" cx="50%" cy="45%" r="55%">
-      <stop offset="0" stop-color="#FFF4C8" />
-      <stop offset="0.45" stop-color="#FFD25A" />
-      <stop offset="1" stop-color="#F06A2A" />
-    </radialGradient>
+    <linearGradient id="nb-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1e26"/>
+      <stop offset="1" stop-color="#07080b"/>
+    </linearGradient>
+    <filter id="nb-inner" x="-10%" y="-10%" width="120%" height="120%">
+      <feOffset dx="0" dy="5" in="SourceAlpha" result="off"/>
+      <feGaussianBlur in="off" stdDeviation="9" result="blur"/>
+      <feComposite in="SourceAlpha" in2="blur" operator="out" result="edge"/>
+      <feFlood flood-color="#000" flood-opacity="0.8"/>
+      <feComposite in2="edge" operator="in" result="shadow"/>
+      <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="shadow"/></feMerge>
+    </filter>
+    <!-- kleiner Schatten je Kachel: sie liegen auf dem Gehäuse -->
+    <filter id="nb-cell" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity="0.55"/>
+    </filter>
+    <!-- Glut-Schein um die heißesten Kacheln -->
+    <filter id="nb-glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.55"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#f06a2a" flood-opacity="0.7"/>
+    </filter>
   </defs>
-  <!-- Pins -->
-  <g stroke="#E8EEF5" stroke-width="3" stroke-linecap="round">
-    <path d="M24 4.5v6M32 4.5v6M40 4.5v6M24 53.5v6M32 53.5v6M40 53.5v6M4.5 24h6M4.5 32h6M4.5 40h6M53.5 24h6M53.5 32h6M53.5 40h6" />
+
+  <rect width="512" height="512" rx="116" fill="url(#nb-tile)" filter="url(#nb-inner)"/>
+  <g>
+    <rect x="68.0" y="68.0" width="64" height="64" rx="16" fill="#31214f" filter="url(#nb-cell)"/>
+    <rect x="146.0" y="68.0" width="64" height="64" rx="16" fill="#70276d" filter="url(#nb-cell)"/>
+    <rect x="224.0" y="68.0" width="64" height="64" rx="16" fill="#bc4162" filter="url(#nb-cell)"/>
+    <rect x="302.0" y="68.0" width="64" height="64" rx="16" fill="#c2465b" filter="url(#nb-cell)"/>
+    <rect x="380.0" y="68.0" width="64" height="64" rx="16" fill="#862a73" filter="url(#nb-cell)"/>
+    <rect x="68.0" y="146.0" width="64" height="64" rx="16" fill="#3a1f5e" filter="url(#nb-cell)"/>
+    <rect x="146.0" y="146.0" width="64" height="64" rx="16" fill="#c2465b" filter="url(#nb-cell)"/>
+    <rect x="224.0" y="146.0" width="64" height="64" rx="16" fill="#f79a40" filter="url(#nb-glow)"/>
+    <rect x="302.0" y="146.0" width="64" height="64" rx="16" fill="#f9a746" filter="url(#nb-glow)"/>
+    <rect x="380.0" y="146.0" width="64" height="64" rx="16" fill="#d55547" filter="url(#nb-cell)"/>
+    <rect x="68.0" y="224.0" width="64" height="64" rx="16" fill="#442061" filter="url(#nb-cell)"/>
+    <rect x="146.0" y="224.0" width="64" height="64" rx="16" fill="#ce504e" filter="url(#nb-cell)"/>
+    <rect x="224.0" y="224.0" width="64" height="64" rx="16" fill="#fbb34c" filter="url(#nb-glow)"/>
+    <rect x="302.0" y="224.0" width="64" height="64" rx="16" fill="#fdc152" filter="url(#nb-glow)"/>
+    <rect x="380.0" y="224.0" width="64" height="64" rx="16" fill="#e36038" filter="url(#nb-cell)"/>
+    <rect x="68.0" y="302.0" width="64" height="64" rx="16" fill="#352056" filter="url(#nb-cell)"/>
+    <rect x="146.0" y="302.0" width="64" height="64" rx="16" fill="#9f2d7a" filter="url(#nb-cell)"/>
+    <rect x="224.0" y="302.0" width="64" height="64" rx="16" fill="#e36038" filter="url(#nb-cell)"/>
+    <rect x="302.0" y="302.0" width="64" height="64" rx="16" fill="#ea6630" filter="url(#nb-cell)"/>
+    <rect x="380.0" y="302.0" width="64" height="64" rx="16" fill="#b1386e" filter="url(#nb-cell)"/>
+    <rect x="68.0" y="380.0" width="64" height="64" rx="16" fill="#2c2246" filter="url(#nb-cell)"/>
+    <rect x="146.0" y="380.0" width="64" height="64" rx="16" fill="#371f5a" filter="url(#nb-cell)"/>
+    <rect x="224.0" y="380.0" width="64" height="64" rx="16" fill="#69266b" filter="url(#nb-cell)"/>
+    <rect x="302.0" y="380.0" width="64" height="64" rx="16" fill="#70276d" filter="url(#nb-cell)"/>
+    <rect x="380.0" y="380.0" width="64" height="64" rx="16" fill="#3a1f5e" filter="url(#nb-cell)"/>
   </g>
-  <!-- Chip -->
-  <rect x="11" y="11" width="42" height="42" rx="10" fill="#151A22" stroke="#E8EEF5" stroke-width="3" />
-  <!-- Isothermen -->
-  <path d="M33 18.5c8.6 0 13.5 5.6 13.5 12.6S41 45.5 31.6 45.5c-8 0-14.1-5.3-14.1-12.8S24.1 18.5 33 18.5z"
-        fill="none" stroke="#A42E7B" stroke-width="2.6" />
-  <path d="M34.6 23.6c4.9 0 7.9 3.4 7.9 7.3s-3.4 8.6-8.8 8.6c-4.6 0-7.9-3.1-7.9-7.4s3.8-8.5 8.8-8.5z"
-        fill="none" stroke="#F06A2A" stroke-width="2.6" />
-  <!-- Hotspot -->
-  <circle cx="35.4" cy="30.8" r="4.4" fill="url(#nb-core-a)" />
 </svg><span class="wordmark">Nebula</span></div>
     <div class="titlebar__clock" id="clock">--:--</div>
     <div class="titlebar__controls">
+      <button class="update-pill hidden" id="update-pill" title="Update"><span class="update-pill__dot"></span><span id="update-pill-text">Update</span></button>
       <button class="wc" id="wc-min" title="Minimieren"><svg viewBox="0 0 10 10"><path d="M1 5h8" /></svg></button>
       <button class="wc" id="wc-max" title="Maximieren"><svg viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" /></svg></button>
       <button class="wc wc--close" id="wc-close" title="Schließen"><svg viewBox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" /></svg></button>
@@ -56,10 +90,16 @@
       <button class="nav" data-view="notes"><span class="nav__icon">✎</span>Notizen</button>
       <button class="nav" data-view="debug"><span class="nav__icon">⌁</span>Debug</button>
       <button class="nav" data-view="settings"><span class="nav__icon">⚙</span>Einstellungen</button>
+      <button class="atlas-launch" id="btn-atlas" title="ATLAS in eigenem Fenster öffnen">
+        <span class="atlas-launch__mark"><svg class="atlas-logo" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true"><circle class="logo-ring" cx="32" cy="32" r="29.5" /><g transform="rotate(-14 32 40)"><path class="logo-orbit logo-orbit-back" d="M10 40 A22 7.5 0 0 1 54 40" /></g><path class="logo-a" d="M13 52 L32 10 L51 52" stroke="url(#atlas-logo-grad)" /><g transform="rotate(-14 32 40)"><path class="logo-orbit" d="M54 40 A22 7.5 0 0 1 10 40" /><circle class="logo-moon" r="2.7" cx="0" cy="0"><animateMotion dur="8s" repeatCount="indefinite" path="M10 40 A22 7.5 0 0 1 54 40 A22 7.5 0 0 1 10 40" /><animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="0.4;0.4;1;1" keyTimes="0;0.5;0.5;1" /></circle></g><circle class="logo-star" cx="32" cy="10" r="3.3" /></svg></span>
+        <span class="atlas-launch__text"><strong>ATLAS</strong><small>KI-Zentrale</small></span>
+        <em class="atlas-launch__badge">Neu</em>
+      </button>
       <div class="sidebar__foot">
         <div class="mini-stat"><span>Prozesse</span><strong id="side-procs">—</strong></div>
         <div class="mini-stat"><span>Laufzeit</span><strong id="side-uptime">—</strong></div>
         <div class="shortcut"><kbd>Strg</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd><small>ein-/ausblenden</small></div>
+        <div class="shortcut"><kbd>1</kbd>–<kbd>9</kbd><small>Ansichten wechseln</small></div>
       </div>
     </nav>
 
@@ -82,6 +122,14 @@
             <p class="muted">Windows gibt CPU-Temperaturen meist nicht frei. Mit LibreHardwareMonitor bekommst du alle Werte.</p>
           </div>
           <button class="btn btn--primary btn--small" data-goto="sensors">Einrichten</button>
+        </div>
+
+        <div class="card health-card">
+          <div class="card__head">
+            <h3>Systemcheck</h3>
+            <span class="muted" id="health-summary">wird geprüft …</span>
+          </div>
+          <div class="health" id="health"></div>
         </div>
 
         <div class="tiles">
@@ -430,6 +478,10 @@
             <label class="switch"><input type="checkbox" id="s-top" /><span></span></label>
           </div>
           <div class="setting">
+            <div><strong>Anderen Programmen den Vortritt lassen</strong><p class="muted">Nebula und ATLAS laufen mit niedrigerer Priorität und messen im Hintergrund seltener – Spiele und andere Programme werden nicht ausgebremst</p></div>
+            <label class="switch"><input type="checkbox" id="s-yield" /><span></span></label>
+          </div>
+          <div class="setting">
             <div><strong>In Tray minimieren</strong><p class="muted">Schließen versteckt die App nur</p></div>
             <label class="switch"><input type="checkbox" id="s-tray" /><span></span></label>
           </div>
@@ -438,12 +490,37 @@
             <label class="switch"><input type="checkbox" id="s-auto" /><span></span></label>
           </div>
           <div class="setting">
+            <div><strong>Hitze-Warnung</strong><p class="muted">Windows-Benachrichtigung, wenn CPU oder GPU anhaltend zu heiß werden</p></div>
+            <label class="switch"><input type="checkbox" id="s-alert" /><span></span></label>
+          </div>
+          <div class="setting">
+            <div><strong>Warnung ab</strong><p class="muted">Ab dieser Temperatur wird gewarnt</p></div>
+            <select class="input" id="s-alert-temp">
+              <option value="80">80 °C</option>
+              <option value="85">85 °C</option>
+              <option value="90">90 °C</option>
+              <option value="95">95 °C</option>
+            </select>
+          </div>
+          <div class="setting">
             <div><strong>Sensor-Dienst-Port</strong><p class="muted">Port von LibreHardwareMonitor (Standard 8085)</p></div>
             <input class="input" id="s-port" type="number" min="1" max="65535" />
           </div>
           <div class="setting">
             <div><strong>Sensor-Dienst entfernen</strong><p class="muted">Beendet LibreHardwareMonitor und löscht den Autostart</p></div>
             <button class="btn btn--ghost btn--small" id="btn-remove-sensors">Entfernen</button>
+          </div>
+          <div class="setting setting--update">
+            <div>
+              <strong>Updates</strong>
+              <p class="muted" id="update-status">Wird geprüft …</p>
+              <p class="update-notes hidden" id="update-notes"></p>
+              <div class="update-progress hidden" id="update-progress"><div class="update-progress__fill" id="update-progress-fill"></div></div>
+            </div>
+            <div class="update-actions">
+              <button class="btn btn--ghost btn--small" id="btn-update-check">Nach Updates suchen</button>
+              <button class="btn btn--primary btn--small hidden" id="btn-update-main">Update laden</button>
+            </div>
           </div>
           <p class="muted version" id="version"></p>
         </div>
@@ -462,10 +539,30 @@
     </div>
   </div>
 
+  <div class="whatsnew hidden" id="whatsnew">
+    <div class="whatsnew__box" role="dialog" aria-modal="true" aria-labelledby="whatsnew-title">
+      <div class="whatsnew__orbit"><svg class="atlas-logo" viewBox="0 0 64 64" width="44" height="44" aria-hidden="true"><circle class="logo-ring" cx="32" cy="32" r="29.5" /><g transform="rotate(-14 32 40)"><path class="logo-orbit logo-orbit-back" d="M10 40 A22 7.5 0 0 1 54 40" /></g><path class="logo-a" d="M13 52 L32 10 L51 52" stroke="url(#atlas-logo-grad)" /><g transform="rotate(-14 32 40)"><path class="logo-orbit" d="M54 40 A22 7.5 0 0 1 10 40" /><circle class="logo-moon" r="2.7" cx="0" cy="0"><animateMotion dur="8s" repeatCount="indefinite" path="M10 40 A22 7.5 0 0 1 54 40 A22 7.5 0 0 1 10 40" /><animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="0.4;0.4;1;1" keyTimes="0;0.5;0.5;1" /></circle></g><circle class="logo-star" cx="32" cy="10" r="3.3" /></svg></div>
+      <p class="whatsnew__kicker">Nebula 1.7</p>
+      <h3 id="whatsnew-title">Neu: ATLAS – deine KI-Zentrale</h3>
+      <p>ATLAS versteht deinen PC und erledigt Aufgaben für dich: Speicher aufräumen, Programme vollständig entfernen,
+        Sicherheit prüfen, Windows reparieren und Dateien sortieren. Sag es einfach – ATLAS fragt nach, bevor es etwas verändert.</p>
+      <ul>
+        <li>KI-Chat mit spezialisierten Agenten</li>
+        <li>Sicherheitszentrum, Optimierung und Reparatur</li>
+        <li>Jede Änderung mit Bestätigung, Verlauf und Rückgängig</li>
+      </ul>
+      <div class="whatsnew__actions">
+        <button class="btn btn--ghost" id="whatsnew-later">Später</button>
+        <button class="btn btn--primary" id="whatsnew-open">ATLAS öffnen</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
   <script src="background.js"></script>
   <script src="renderer.js"></script>
   <script src="processes.js"></script>
   <script src="details.js"></script>
+  <script src="update.js"></script>
 </body>
 </html>

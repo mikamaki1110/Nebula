@@ -5,7 +5,8 @@
 <h1 align="center">Nebula</h1>
 
 <p align="center">
-  Hardware-Monitor für Windows: Temperaturen, Auslastung, Prozesse und alle Bauteile deines PCs auf einen Blick.
+  Hardware-Monitor für Windows: Temperaturen, Auslastung, Prozesse und alle Bauteile deines PCs auf einen Blick –
+  ab Version 1.7 mit <strong>ATLAS</strong>, der KI-Zentrale für deinen PC.
 </p>
 
 <p align="center">
@@ -13,6 +14,18 @@
 </p>
 
 ---
+
+## Neu in 1.7: ATLAS
+
+ATLAS öffnest du über den Eintrag **ATLAS · KI-Zentrale** in der Seitenleiste oder über das Tray-Symbol.
+ATLAS versteht natürliche Aufträge („Mein PC ist langsam – finde heraus, warum“) und erledigt sie mit
+spezialisierten Agenten: Speicher aufräumen, Programme samt Resten entfernen, Sicherheit prüfen,
+Windows reparieren (SFC, DISM, Netzwerk, Treiber) und Dateien sortieren. Jede Änderung zeigt vorher einen
+Bestätigungsdialog, wird protokolliert und lässt sich – wo möglich – im Verlauf rückgängig machen.
+Für den KI-Chat gibt es drei Wege: **lokale KI mit Ollama** (kostenlos, läuft auf deinem PC; die Installation mit einem PowerShell-Befehl wird in ATLAS unter Einstellungen → Lokale KI Schritt für Schritt erklärt), den Gratis-Zugang (falls eingerichtet) oder einen eigenen Anthropic-API-Schlüssel. Alle anderen Bereiche funktionieren ohne KI.
+
+Außerdem neu: **Update-Knopf**. Gibt es eine neue Version, erscheint oben rechts „Update auf x.y.z“.
+Ein Klick lädt sie, ein zweiter installiert sie. Unter Einstellungen → Updates kannst du jederzeit selbst suchen.
 
 ## Installieren
 
