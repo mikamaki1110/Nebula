@@ -1,4 +1,4 @@
-# Nebula Desktop 1.7.4 – Anleitung
+# Nebula Desktop 1.7.5 – Anleitung
 
 ## So bekommen alle 1.6-Nutzer die Version 1.7
 
@@ -10,7 +10,7 @@ Damit das Update dort ankommt, gilt:
    (vorhandene Dateien überschreiben, den versteckten Ordner `.github` und den neuen Ordner `atlas` mitnehmen).
 2. In GitHub Desktop: „Commit to main“ → „Push origin“.
 3. Auf github.com → **Actions** → **Nebula veröffentlichen** → **Run workflow**.
-4. Nach ca. 10 Minuten liegt unter **Releases** die Version **1.7.4** – als normales Release,
+4. Nach ca. 10 Minuten liegt unter **Releases** die Version **1.7.5** – als normales Release,
    nicht als Entwurf. Daran nichts mehr ändern (vor allem die Datei `latest.yml` nicht löschen).
 
 **Was 1.6-Nutzer dann sehen:**
@@ -39,6 +39,23 @@ Unter „Welche KI soll ATLAS benutzen?“: **Automatisch** (eigener Schlüssel 
 **Nur lokal** (nichts verlässt den PC) oder **Nur Cloud**.
 Hinweis: Lokale 8B-Modelle sind weniger zuverlässig als Claude – bei verschachtelten Aufgaben
 kann ein Werkzeugaufruf schiefgehen. Für Alltagsfragen reichen sie gut.
+
+## Neu in 1.7.5: schnellere lokale KI
+- **Gleichbleibender Vorspann:** Bisher stand die aktuelle CPU-/RAM-Last im Systemtext, sodass er sich bei jeder Frage änderte und Ollama
+  alles (mehrere tausend Tokens) neu verarbeiten musste. Jetzt hängt der PC-Stand hinten an der Frage; Systemtext und Werkzeugliste
+  bleiben identisch, und Ollama kann seine Zwischenspeicherung nutzen. Prüfen: In Nebula → Debug steht je Antwort „Frage verarbeiten: N Token in X s“.
+  Bei der zweiten Frage sollte N deutlich kleiner sein als bei der ersten.
+- **Direktroute:** Ist der Fachbereich eindeutig (Speicher, Sicherheit, Programme, Reparatur, Leistung, System), geht die Frage gleich an den
+  Spezialisten, der auch direkt antwortet. Das spart bei lokalen Modellen zwei von mindestens vier Modellaufrufen. Unklare oder gemischte
+  Aufträge gehen weiter an den Hauptagenten. Mit Cloud-KI ändert sich nichts.
+- **Antwort erscheint beim Schreiben (Streaming):** Du siehst den Text sofort entstehen, statt zu warten, bis alles fertig ist.
+- **Kompaktere Werkzeugtexte** für lokale Modelle (ca. 20 % weniger Text).
+- **Tempo prüfen:** Einstellungen → Lokale KI → „Geschwindigkeit messen“ zeigt Token pro Sekunde und den Anteil auf der Grafikkarte.
+  Damit lassen sich Modelle und Einstellungen vergleichen.
+- **Turbo-Modus für Ollama:** Schaltet Flash Attention und einen auf 8 Bit komprimierten Zwischenspeicher ein (halber Grafikspeicher
+  für den Gesprächsverlauf). Setzt zwei Benutzer-Umgebungsvariablen und startet Ollama neu; mit Bestätigung, im Verlauf umkehrbar.
+  Geht ein Modell damit nicht, einfach wieder ausschalten.
+- **Neues, schnelleres Modell zur Auswahl:** `qwen3:4b-instruct-2507-q4_K_M` (2,5 GB, antwortet eigens ohne Nachdenken).
 
 ## Neu in 1.7.4: eigenes ATLAS-Logo
 - **Das ATLAS-Zeichen:** Ein „A“, das zugleich ein Berggipfel ist (Atlasgebirge, Karte), mit einer Umlaufbahn als Querbalken und einem
@@ -92,15 +109,15 @@ Einrichtung: `proxy/ANLEITUNG.md` (Doppelklick auf `proxy/PROXY-EINRICHTEN.bat`)
 `atlas/src/main/ai/config.ts` eintragen. **Den API-Schlüssel nie in die App schreiben.**
 
 ## Neue Version veröffentlichen (ab jetzt)
-1. In `package.json` die `version` erhöhen (z. B. 1.7.4 → 1.7.5). **Ohne höhere Nummer gibt es kein Update.**
+1. In `package.json` die `version` erhöhen (z. B. 1.7.5 → 1.7.6). **Ohne höhere Nummer gibt es kein Update.**
 2. Pushen, Workflow „Nebula veröffentlichen“ starten.
 3. Optional: Im Release auf GitHub einen Beschreibungstext eintragen – er erscheint in Nebula unter
    Einstellungen → Updates als „Neu in x.y.z“.
 
 ## EXE lokal bauen (nur zum Testen)
 Doppelklick auf `EXE-BAUEN.bat` → danach öffnet sich der Ordner `dist` mit:
-- `Nebula-Setup-1.7.4.exe` (Installer)
-- `Nebula-Portable-1.7.4.exe` (portable Version)
+- `Nebula-Setup-1.7.5.exe` (Installer)
+- `Nebula-Portable-1.7.5.exe` (portable Version)
 
 Lokal gebaute EXEs suchen keine Updates auf GitHub, nur die vom Workflow veröffentlichten.
 

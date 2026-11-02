@@ -1,7 +1,7 @@
 import http from 'http'
 import { describe, expect, it } from 'vitest'
 import {
-  buildChatBody, callOllama, fromOllamaResponse, hasModel, isValidModelName, ollamaLoad, ollamaUrl,
+  benchmarkModel, buildChatBody, callOllama, describeStats, fromOllamaResponse, hasModel, isValidModelName, ollamaLoad, ollamaUrl,
   pullModel, toOllamaMessages, unloadModel, warmUpModel
 } from '../src/main/ai/ollama'
 
@@ -109,6 +109,88 @@ describe('Tempo', () => {
     srv.close()
     srv = await fakeOllama((_u, _b, res) => res.end(JSON.stringify({ models: [] })))
     expect(await ollamaLoad()).toBeNull()
+    srv.close()
+  })
+})
+
+/** Antwort in mehreren Stücken wie ein echter Ollama-Server (eine JSON-Zeile je Stück). */
+function chunks(lines: unknown[]): (_u: string, _b: any, res: http.ServerResponse) => void {
+  return (_u, _b, res) => { for (const l of lines) res.write(JSON.stringify(l) + '\n'); res.end() }
+}
+const FINAL = { done: true, total_duration: 4_000_000_000, load_duration: 2_000_000_000, prompt_eval_count: 1200, prompt_eval_duration: 800_000_000, eval_count: 40, eval_duration: 2_000_000_000 }
+
+describe('Streaming', () => {
+  it('liefert die Antwort Stück für Stück in der richtigen Reihenfolge und meldet die Messwerte', async () => {
+    const srv = await fakeOllama(chunks([
+      { message: { role: 'assistant', content: 'Dein ' } }, { message: { role: 'assistant', content: 'PC ' } },
+      { message: { role: 'assistant', content: 'läuft gut.' } }, { message: { role: 'assistant', content: '' }, ...FINAL }
+    ]))
+    const got: string[] = []
+    const r = await callOllama({ ...ask, onText: (d) => got.push(d) })
+    expect(got).toEqual(['Dein ', 'PC ', 'läuft gut.'])
+    expect((r.content[0] as { text: string }).text).toBe('Dein PC läuft gut.')
+    expect(srv.seen[0]!.body.stream).toBe(true)
+    expect(r.stats).toEqual({ promptTokens: 1200, promptMs: 800, genTokens: 40, genMs: 2000, totalMs: 4000, loadMs: 2000 })
+    srv.close()
+  })
+
+  it('setzt Werkzeugaufrufe aus den Stücken zusammen', async () => {
+    const srv = await fakeOllama(chunks([
+      { message: { role: 'assistant', content: 'Ich schaue nach.' } },
+      { message: { role: 'assistant', content: '', tool_calls: [{ function: { name: 'system__live', arguments: { a: 1 } } }] } },
+      { message: { role: 'assistant', content: '' }, ...FINAL }
+    ]))
+    const r = await callOllama({ ...ask, onText: () => undefined })
+    expect(r.stop_reason).toBe('tool_use')
+    expect(r.content.map((b) => b.type)).toEqual(['text', 'tool_use'])
+    expect((r.content[1] as { input: unknown }).input).toEqual({ a: 1 })
+    srv.close()
+  })
+
+  it('meldet einen Fehler mitten in der Antwort, statt halbe Texte zu liefern', async () => {
+    const srv = await fakeOllama(chunks([{ message: { role: 'assistant', content: 'Halb' } }, { error: 'CUDA out of memory' }]))
+    let msg = ''
+    try { await callOllama({ ...ask, onText: () => undefined }) } catch (e) { msg = (e as Error).message }
+    expect(msg.includes('out of memory')).toBe(true)
+    srv.close()
+  })
+
+  it('ruft ohne onText weiter ohne Streaming ab', async () => {
+    const srv = await fakeOllama((_u, _b, res) => res.end(JSON.stringify({ message: { role: 'assistant', content: 'ok' }, ...FINAL })))
+    const r = await callOllama(ask)
+    expect(srv.seen[0]!.body.stream).toBe(false)
+    expect(r.stats?.genTokens).toBe(40)
+    srv.close()
+  })
+})
+
+describe('Messwerte und Geschwindigkeitstest', () => {
+  it('beschreibt eine Antwort in einer lesbaren Zeile', () => {
+    const line = describeStats({ promptTokens: 2100, promptMs: 1400, genTokens: 128, genMs: 6100, totalMs: 9000, loadMs: 3200 })
+    expect(line).toContain('21,0 Token/s')
+    expect(line).toContain('2.100 Token in 1,4 s')
+    expect(line).toContain('Modell laden: 3,2 s')
+  })
+
+  it('rechnet den Test in Token pro Sekunde um', async () => {
+    const srv = await fakeOllama((url, _b, res) => {
+      if (url === '/api/ps') { res.end(JSON.stringify({ models: [{ name: 'qwen3:8b', size: 1000, size_vram: 940 }] })); return }
+      res.end(JSON.stringify({ message: { role: 'assistant', content: '1, 2, 3' }, done: true, total_duration: 5e9, load_duration: 3e9, prompt_eval_count: 30, prompt_eval_duration: 1e8, eval_count: 100, eval_duration: 4e9 }))
+    })
+    const b = await benchmarkModel('qwen3:8b', 8192)
+    expect(b.tokensPerSecond).toBe(25)
+    expect(b.promptTokensPerSecond).toBe(300)
+    expect(b.loadMs).toBe(3000)
+    expect(b.gpuPercent).toBe(94)
+    expect(srv.seen[0]!.body.options.temperature).toBe(0)
+    srv.close()
+  })
+
+  it('erklärt, wenn Ollama keine Messwerte liefert', async () => {
+    const srv = await fakeOllama((_u, _b, res) => res.end(JSON.stringify({ message: { content: 'x' } })))
+    let msg = ''
+    try { await benchmarkModel('qwen3:8b', 8192) } catch (e) { msg = (e as Error).message }
+    expect(msg.includes('Messwerte')).toBe(true)
     srv.close()
   })
 })

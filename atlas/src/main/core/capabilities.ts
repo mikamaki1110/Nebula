@@ -3,6 +3,7 @@ import { basename } from 'path'
 import { z } from 'zod'
 import type { CapId, CapIn, CapOut, MoveRecord, RiskLevel, WindowsPage } from '@shared/types'
 import { listAutostart, setAutostart } from '../services/autostart'
+import { setTurbo, turboStatus } from '../services/ollamaTurbo'
 import * as files from '../services/files'
 import { listSnapshots, optimizeCached, optimizeReport, takeSnapshot } from '../services/optimize'
 import { assertProgramId, findLeftovers, listPrograms, uninstallProgram } from '../services/programs'
@@ -218,6 +219,27 @@ export const CAPABILITIES: Capability[] = [
   cap({ id: 'repair.events', title: 'Windows-Fehlerprotokoll', risk: 'read', input: z.object({ days: z.number().int().min(1).max(30).optional() }),
     description: 'Fasst kritische Ereignisse und Fehler aus dem System- und Anwendungsprotokoll der letzten Tage gruppiert zusammen.',
     run: (i) => recentErrors(i.days) }),
+
+  // ── Lokale KI ─────────────────────────────────────────────
+  cap({ id: 'ollama.turboStatus', title: 'Ollama-Turbo: Status', risk: 'read', input: empty,
+    description: 'Ob der Turbo-Modus (Flash Attention, komprimierter Zwischenspeicher) für Ollama eingeschaltet ist.',
+    exposeToAgent: false, run: turboStatus }),
+  cap({ id: 'ollama.turbo', title: 'Ollama-Turbo', risk: 'modify', input: z.object({ enable: z.boolean() }),
+    description: 'Schaltet den Turbo-Modus für Ollama ein oder aus und startet Ollama neu.',
+    exposeToAgent: false,
+    confirm: (i) => ({
+      title: i.enable ? 'Turbo-Modus für Ollama einschalten?' : 'Turbo-Modus für Ollama ausschalten?',
+      confirmLabel: i.enable ? 'Einschalten und Ollama neu starten' : 'Ausschalten und Ollama neu starten',
+      details: [
+        i.enable ? 'Setzt für dein Benutzerkonto OLLAMA_FLASH_ATTENTION=1 und OLLAMA_KV_CACHE_TYPE=q8_0.' : 'Entfernt diese beiden Umgebungsvariablen wieder.',
+        i.enable ? 'Das halbiert den Grafikspeicher, den der Gesprächsverlauf braucht – die KI passt öfter komplett auf die Grafikkarte.' : 'Ollama arbeitet danach wieder mit den Standardwerten.',
+        'Ollama wird dazu kurz beendet und neu gestartet. Läuft gerade etwas anderes mit Ollama, bricht es ab.',
+        'Jederzeit umkehrbar (Verlauf).'
+      ]
+    }),
+    run: (i) => setTurbo(i.enable),
+    record: (i, o) => ({ summary: `Ollama-Turbo ${i.enable ? 'eingeschaltet' : 'ausgeschaltet'}${o.restarted ? ' (Ollama neu gestartet)' : ''}`,
+      undo: { capId: 'ollama.turbo', input: { enable: !i.enable }, summary: `Ollama-Turbo wieder ${i.enable ? 'ausschalten' : 'einschalten'}` } }) }),
 
   // ── Optimierung ───────────────────────────────────────────
   cap({ id: 'optimize.report', title: 'Optimierungsanalyse', risk: 'read', input: empty,

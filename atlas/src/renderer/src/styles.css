@@ -682,3 +682,17 @@ h1, h2, h3 { font-weight: 600; }
 .topbar { -webkit-app-region: drag; padding-right: max(var(--page-x), calc(100vw - env(titlebar-area-width, calc(100vw - 150px)) + 12px)); }
 .topbar button, .topbar input, .topbar .readouts { -webkit-app-region: no-drag; }
 .brand { -webkit-app-region: drag; }
+
+/* Antwort erscheint beim Schreiben: kleiner Cursor am Ende */
+.msg.atlas.streaming .rich > :last-child::after { content: ''; display: inline-block; width: 7px; height: 1.05em; margin-left: 3px; vertical-align: -0.15em; background: var(--accent); border-radius: 1px; animation: caret 0.9s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+
+/* Tempo der lokalen KI: Test und Turbo */
+.speed-row { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.bench-result { display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: baseline; margin: 12px 0 0; }
+.bench-result strong { font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; }
+.bench-result span { color: var(--dusk); font-size: 0.88rem; }
+.bench-good strong { color: var(--good); } .bench-ok strong { color: var(--warn); } .bench-slow strong { color: var(--bad); }
+.turbo-row { display: flex; justify-content: space-between; align-items: center; gap: 18px; }
+.turbo-row p { margin: 0; }
+.turbo-row p + p { margin-top: 6px; }

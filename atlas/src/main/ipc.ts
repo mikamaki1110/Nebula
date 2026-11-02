@@ -1,9 +1,9 @@
 import { spawn } from 'child_process'
 import { BrowserWindow, clipboard, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
-import { IPC, OLLAMA_INSTALL_COMMAND, type AiStatus, type Result, type Settings } from '@shared/contract'
+import { IPC, OLLAMA_INSTALL_COMMAND, type AiStatus, type Benchmark, type Result, type Settings } from '@shared/contract'
 import { cancelChat, chat, resetChat } from './ai/agents'
 import { resolveSource, setSessionKey } from './ai/anthropic'
-import { hasModel, isValidModelName, ollamaInfo, ollamaLoad, pullModel, RECOMMENDED_MODELS } from './ai/ollama'
+import { benchmarkModel, hasModel, isValidModelName, ollamaInfo, ollamaLoad, pullModel, RECOMMENDED_MODELS } from './ai/ollama'
 import { resolveConfirmation } from './core/confirm'
 import { auditPath, execute, listHistory, undoHistory } from './core/execute'
 import { getSettings, updateSettings } from './core/settings'
@@ -37,6 +37,7 @@ async function aiStatus(force = false): Promise<AiStatus> {
 }
 
 let pulling = false
+let benchmarking = false
 
 export function registerIpc(getWindow: () => BrowserWindow | null): void {
   currentWindow = getWindow
@@ -64,6 +65,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle(IPC.openPowerShell, () => {
     if (process.platform !== 'win32') return
     spawn('cmd.exe', ['/c', 'start', '', 'powershell.exe'], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+  })
+  handle(IPC.ollamaBenchmark, async (): Promise<Result<Benchmark>> => {
+    if (benchmarking) return { ok: false, error: 'Der Test läuft bereits.' }
+    benchmarking = true
+    try {
+      const { ollamaModel, aiContext } = getSettings()
+      return { ok: true, data: await benchmarkModel(ollamaModel, aiContext) }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Test fehlgeschlagen.' }
+    } finally {
+      benchmarking = false
+    }
   })
   handle(IPC.ollamaDownloadPage, async () => { await shell.openExternal('https://ollama.com/download') })
   handle(IPC.ollamaPull, async (event, model: unknown): Promise<Result<AiStatus>> => {

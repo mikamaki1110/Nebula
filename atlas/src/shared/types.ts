@@ -171,6 +171,8 @@ export interface ConfirmRequest {
 
 export type ChatEvent =
   | { type: 'step'; agent: string; text: string }
+  /** Ein Stück der Antwort, sobald die KI es geschrieben hat (Streaming) – die Antwort erscheint, während sie entsteht. */
+  | { type: 'delta'; text: string }
   | { type: 'message'; text: string }
   | { type: 'error'; text: string }
   | { type: 'done' }
@@ -191,6 +193,16 @@ export interface AiStatus {
     load: { model: string; percentGpu: number } | null
   }
 }
+/** Ergebnis des Geschwindigkeitstests der lokalen KI. */
+export interface Benchmark {
+  model: string
+  tokensPerSecond: number
+  promptTokensPerSecond: number | null
+  loadMs: number
+  totalMs: number
+  gpuPercent: number | null
+}
+
 export interface PullProgress { model: string; status: string; percent: number | null }
 
 /** Jede Fähigkeit von ATLAS mit Ein- und Ausgabetyp. */
@@ -232,6 +244,8 @@ export interface CapMap {
   'optimize.cached': { in: Record<string, never>; out: OptimizeReport | null }
   'optimize.snapshot': { in: { label?: string }; out: Snapshot }
   'optimize.snapshots': { in: Record<string, never>; out: Snapshot[] }
+  'ollama.turboStatus': { in: Record<string, never>; out: { enabled: boolean } }
+  'ollama.turbo': { in: { enable: boolean }; out: { enabled: boolean; wasRunning: boolean; restarted: boolean } }
 }
 export type CapId = keyof CapMap
 export type CapIn<K extends CapId> = CapMap[K]['in']

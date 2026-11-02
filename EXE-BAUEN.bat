@@ -36,8 +36,8 @@ echo.
 echo  ===========================================
 echo   FERTIG! Der Ordner "dist" wird geoeffnet.
 echo  ===========================================
-echo   Nebula-Setup-1.7.4.exe    = Installer
-echo   Nebula-Portable-1.7.4.exe = Portable Version
+echo   Nebula-Setup-1.7.5.exe    = Installer
+echo   Nebula-Portable-1.7.5.exe = Portable Version
 echo.
 start "" "%~dp0dist"
 pause

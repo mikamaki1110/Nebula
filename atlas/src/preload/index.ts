@@ -27,6 +27,7 @@ const api: AtlasApi = {
     onPullProgress: (cb) => subscribe<PullProgress>(IPC.ollamaProgress, cb),
     openOllamaDownload: () => ipcRenderer.invoke(IPC.ollamaDownloadPage),
     copyInstallCommand: () => ipcRenderer.invoke(IPC.ollamaCopyCommand),
+    benchmark: () => ipcRenderer.invoke(IPC.ollamaBenchmark),
     openPowerShell: () => ipcRenderer.invoke(IPC.openPowerShell)
   },
   chat: {

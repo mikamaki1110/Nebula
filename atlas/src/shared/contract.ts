@@ -1,5 +1,5 @@
 import type {
-  AiStatus, CapId, CapIn, CapOut, ChatEvent, ConfirmRequest, HistoryEntry, PullProgress, Result, Settings
+  AiStatus, Benchmark, CapId, CapIn, CapOut, ChatEvent, ConfirmRequest, HistoryEntry, PullProgress, Result, Settings
 } from './types'
 
 export * from './types'
@@ -22,6 +22,7 @@ export const IPC = {
   ollamaProgress: 'atlas:ollama-progress',
   ollamaDownloadPage: 'atlas:ollama-download-page',
   ollamaCopyCommand: 'atlas:ollama-copy-command',
+  ollamaBenchmark: 'atlas:ollama-benchmark',
   openPowerShell: 'atlas:open-powershell',
   chatSend: 'atlas:chat-send',
   chatCancel: 'atlas:chat-cancel',
@@ -50,6 +51,7 @@ export interface AtlasApi {
     onPullProgress(cb: (p: PullProgress) => void): () => void
     openOllamaDownload(): Promise<void>
     copyInstallCommand(): Promise<void>
+    benchmark(): Promise<Result<Benchmark>>
     openPowerShell(): Promise<void>
   }
   chat: {

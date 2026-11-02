@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { OLLAMA_INSTALL_COMMAND } from '@shared/contract'
-import type { AiStatus, PullProgress, Settings } from '@shared/types'
+import type { AiStatus, Benchmark, PullProgress, Settings } from '@shared/types'
 import { useApp } from '../state/app'
 import { Bar, Button, Panel, Tabs } from './ui'
 
@@ -55,6 +55,32 @@ export function LocalAiPanel({ status, onStatus, settings, saveSettings }: {
   useEffect(() => window.atlas.ai.onPullProgress(setProgress), [])
   const refresh = async (): Promise<void> => onStatus(await window.atlas.ai.status())
   const [copied, setCopied] = useState(false)
+  const [bench, setBench] = useState<Benchmark | null>(null)
+  const [benching, setBenching] = useState(false)
+  const [turbo, setTurbo] = useState<boolean | null>(null)
+  const [turboBusy, setTurboBusy] = useState(false)
+
+  useEffect(() => { void window.atlas.call('ollama.turboStatus', {}).then((r) => setTurbo(r.ok ? r.data.enabled : null)) }, [])
+
+  const runBench = async (): Promise<void> => {
+    setBenching(true)
+    setBench(null)
+    const r = await window.atlas.ai.benchmark()
+    setBenching(false)
+    if (r.ok) { setBench(r.data); void refresh() } else toast(r.error, 'error')
+  }
+
+  const toggleTurbo = async (): Promise<void> => {
+    setTurboBusy(true)
+    const r = await window.atlas.call('ollama.turbo', { enable: !turbo })
+    setTurboBusy(false)
+    if (r.ok) {
+      setTurbo(r.data.enabled)
+      setBench(null)
+      toast(r.data.restarted ? 'Turbo geändert – Ollama wurde neu gestartet.' : 'Turbo geändert. Ollama übernimmt es beim nächsten Start.', 'ok')
+      setTimeout(() => void refresh(), 3000)
+    } else if (r.error !== 'Vom Benutzer abgelehnt.') toast(r.error, 'error')
+  }
 
   // Solange Ollama noch nicht läuft, schaut ATLAS alle 4 Sekunden nach – nach der Installation geht es von selbst weiter.
   const running = status?.ollama.running ?? false
@@ -184,6 +210,36 @@ export function LocalAiPanel({ status, onStatus, settings, saveSettings }: {
             {o.load.percentGpu < 90 && ' Der Rest läuft auf dem Prozessor – das ist deutlich langsamer. Wähle „Schnell“ oder das kleinere Modell qwen3:4b.'}
           </p>
         )}
+      </div>
+
+      <div className="speed-row">
+        <p className="field-label">Tempo prüfen</p>
+        <p className="meta">Misst, wie schnell die KI auf deinem PC schreibt – damit du Modelle und Einstellungen vergleichen kannst.</p>
+        <div className="btn-row">
+          <Button variant="primary" busy={benching} disabled={!o?.running || !o.installed} onClick={() => void runBench()}>Geschwindigkeit messen</Button>
+        </div>
+        {bench && (
+          <p className={`bench-result ${bench.tokensPerSecond >= 25 ? 'bench-good' : bench.tokensPerSecond >= 12 ? 'bench-ok' : 'bench-slow'}`}>
+            <strong>{bench.tokensPerSecond.toFixed(1).replace('.', ',')} Token/s</strong>
+            <span>{bench.tokensPerSecond >= 25 ? 'Sehr flott' : bench.tokensPerSecond >= 12 ? 'Gut nutzbar' : 'Langsam – probiere „Schnell“, das kleinere Modell oder den Turbo-Modus'}</span>
+            {bench.gpuPercent !== null && <span>{bench.gpuPercent} % auf der Grafikkarte</span>}
+            {bench.loadMs > 1500 && <span>Modell laden: {(bench.loadMs / 1000).toFixed(1).replace('.', ',')} s</span>}
+          </p>
+        )}
+      </div>
+
+      <div className="speed-row">
+        <div className="turbo-row">
+          <div>
+            <p className="field-label">Turbo-Modus für Ollama</p>
+            <p className="meta">Schaltet Flash Attention und einen komprimierten Zwischenspeicher ein. Das halbiert den Grafikspeicher für den Gesprächsverlauf –
+              die KI passt öfter komplett auf die Grafikkarte und wird dann spürbar schneller. Ollama wird dabei kurz neu gestartet.</p>
+            <p className="meta subtle">Nach dem Einschalten oben „Geschwindigkeit messen“ – so siehst du, ob es bei dir etwas bringt. Wenn nicht, einfach wieder ausschalten.</p>
+          </div>
+          <button type="button" role="switch" aria-checked={!!turbo} className="switch" disabled={turbo === null || turboBusy} onClick={() => void toggleTurbo()} aria-label="Turbo-Modus">
+            <span />
+          </button>
+        </div>
       </div>
     </Panel>
   )

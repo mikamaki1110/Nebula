@@ -96,7 +96,7 @@ export function Chat(): JSX.Element {
         <ol className="chat-log">
           {items.map((it, idx) => {
             if (it.kind === 'user') return <li key={it.id} className="msg user">{it.text}</li>
-            if (it.kind === 'atlas') return <li key={it.id} className="msg atlas"><RichText text={it.text} /></li>
+            if (it.kind === 'atlas') return <li key={it.id} className={it.streaming ? 'msg atlas streaming' : 'msg atlas'}><RichText text={it.text} /></li>
             if (it.kind === 'error') return <li key={it.id} className="msg error">{it.text}</li>
             const prev = items[idx - 1]
             const sameAgent = prev?.kind === 'step' && prev.agent === it.agent
@@ -107,7 +107,7 @@ export function Chat(): JSX.Element {
               </li>
             )
           })}
-          {busy && <li className="step thinking"><span className="pulse" aria-hidden="true" /><span className="step-text">ATLAS arbeitet … {elapsed > 2 && `${elapsed} s`}{source === 'local' && elapsed > 20 && ' – die lokale KI braucht auf diesem PC etwas länger'}</span></li>}
+          {busy && !items.some((x) => x.kind === 'atlas' && x.streaming) && <li className="step thinking"><span className="pulse" aria-hidden="true" /><span className="step-text">ATLAS arbeitet … {elapsed > 2 && `${elapsed} s`}{source === 'local' && elapsed > 20 && ' – die lokale KI braucht auf diesem PC etwas länger'}</span></li>}
         </ol>
         <div ref={endRef} />
       </div>

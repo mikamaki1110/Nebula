@@ -3,7 +3,9 @@
  * ATLAS spricht intern das Anthropic-Format; dieses Modul übersetzt Nachrichten
  * und Werkzeugaufrufe ins Ollama-Format und die Antworten zurück.
  */
-import type { ClaudeResponse, ContentBlock, Message, Tool } from './anthropic'
+import type { Benchmark } from '@shared/types'
+import { log } from '../core/log'
+import type { ClaudeResponse, ContentBlock, LocalStats, Message, Tool } from './anthropic'
 
 /**
  * Adresse von Ollama. Wer die Umgebungsvariable OLLAMA_HOST selbst gesetzt hat, schreibt sie oft ohne
@@ -25,9 +27,9 @@ export const DEFAULT_CONTEXT = 8_192
 /** Wie lange Ollama das Modell nach der letzten Anfrage im Speicher hält (Standard wäre 5 Minuten). */
 export const KEEP_ALIVE = '30m'
 export const RECOMMENDED_MODELS = [
-  { name: 'qwen3:8b', size: '5,2 GB', hint: 'Empfohlen – beherrscht Werkzeugaufrufe, braucht ca. 7 GB Grafikspeicher' },
-  { name: 'gpt-oss:20b', size: 'ca. 14 GB', hint: 'Klüger, aber langsamer – braucht viel RAM' },
-  { name: 'qwen3:4b', size: 'ca. 2,5 GB', hint: 'Deutlich schneller und kleiner – dafür weniger zuverlässig bei mehrstufigen Aufgaben' }
+  { name: 'qwen3:8b', size: '5,2 GB', hint: 'Standard – zuverlässig bei Werkzeugen, braucht ca. 7 GB Grafikspeicher' },
+  { name: 'qwen3:4b-instruct-2507-q4_K_M', size: '2,5 GB', hint: 'Am schnellsten – antwortet eigens ohne Nachdenken und passt komplett auf kleine Grafikkarten' },
+  { name: 'gpt-oss:20b', size: 'ca. 14 GB', hint: 'Klüger – läuft auf 8-GB-Grafikkarten nur teilweise auf der Karte, daher langsamer' }
 ]
 
 interface OllamaToolCall { function: { name: string; arguments: Record<string, unknown> | string } }
@@ -90,7 +92,7 @@ export function fromOllamaResponse(msg: { content?: string; tool_calls?: OllamaT
   return { content, stop_reason: hasTools ? 'tool_use' : 'end_turn' }
 }
 
-interface ChatOpts { model: string; system: string; messages: Message[]; tools?: Tool[]; signal?: AbortSignal; maxTokens?: number; numCtx?: number }
+interface ChatOpts { model: string; system: string; messages: Message[]; tools?: Tool[]; signal?: AbortSignal; maxTokens?: number; numCtx?: number; onText?: (delta: string) => void }
 
 /** Der Anfragetext an Ollama. think:false schaltet das lange „Nachdenken“ von Qwen3 & Co. ab. */
 export function buildChatBody(opts: ChatOpts, think: boolean): Record<string, unknown> {
@@ -98,11 +100,74 @@ export function buildChatBody(opts: ChatOpts, think: boolean): Record<string, un
     model: opts.model,
     messages: toOllamaMessages(opts.system, opts.messages),
     tools: toOllamaTools(opts.tools),
-    stream: false,
+    stream: Boolean(opts.onText),
     ...(think ? {} : { think: false }),
     keep_alive: KEEP_ALIVE,
     options: { num_ctx: opts.numCtx ?? DEFAULT_CONTEXT, temperature: 0.3, num_predict: opts.maxTokens ?? 1024 }
   }
+}
+
+interface OllamaChunk {
+  message?: { content?: string; tool_calls?: OllamaToolCall[] }
+  done?: boolean
+  error?: string
+  total_duration?: number
+  load_duration?: number
+  prompt_eval_count?: number
+  prompt_eval_duration?: number
+  eval_count?: number
+  eval_duration?: number
+}
+
+/** Ollama meldet Zeiten in Nanosekunden. */
+export function statsFrom(c: OllamaChunk): LocalStats | undefined {
+  if (c.eval_count === undefined && c.prompt_eval_count === undefined) return undefined
+  const ms = (ns?: number): number => Math.round((ns ?? 0) / 1e6)
+  return {
+    promptTokens: c.prompt_eval_count ?? 0, promptMs: ms(c.prompt_eval_duration),
+    genTokens: c.eval_count ?? 0, genMs: ms(c.eval_duration),
+    totalMs: ms(c.total_duration), loadMs: ms(c.load_duration)
+  }
+}
+
+const num = (n: number): string => n.toLocaleString('de-DE')
+const rate = (tokens: number, ms: number): string => (ms > 0 ? (tokens / (ms / 1000)).toFixed(1).replace('.', ',') : '–')
+
+/** Eine Zeile fürs Debug-Protokoll: So sieht man, wo die Zeit hingeht. */
+export function describeStats(st: LocalStats): string {
+  return `Antwort: ${num(st.genTokens)} Token in ${(st.genMs / 1000).toFixed(1).replace('.', ',')} s (${rate(st.genTokens, st.genMs)} Token/s) · `
+    + `Frage verarbeiten: ${num(st.promptTokens)} Token in ${(st.promptMs / 1000).toFixed(1).replace('.', ',')} s`
+    + (st.loadMs > 1500 ? ` · Modell laden: ${(st.loadMs / 1000).toFixed(1).replace('.', ',')} s` : '')
+}
+
+/** Liest die Antwort Stück für Stück (NDJSON). Jedes Textstück geht sofort an onText. */
+async function readChatStream(res: Response, onText: (delta: string) => void): Promise<{ message: { content: string; tool_calls: OllamaToolCall[] }; stats?: LocalStats }> {
+  if (!res.body) throw new Error('Die lokale KI hat keine Antwort geliefert.')
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let content = ''
+  const toolCalls: OllamaToolCall[] = []
+  let stats: LocalStats | undefined
+  const handle = (line: string): void => {
+    if (!line.trim()) return
+    const c = JSON.parse(line) as OllamaChunk
+    if (c.error) throw new Error(`Lokale KI-Fehler: ${c.error}`)
+    const delta = c.message?.content
+    if (delta) { content += delta; onText(delta) }
+    if (c.message?.tool_calls) toolCalls.push(...c.message.tool_calls)
+    if (c.done) stats = statsFrom(c)
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) handle(line)
+  }
+  handle(buffer)
+  return { message: { content, tool_calls: toolCalls }, stats }
 }
 
 function localError(model: string, status: number, body: string): Error {
@@ -136,8 +201,17 @@ export async function callOllama(opts: ChatOpts): Promise<ClaudeResponse> {
     throw new Error('Die lokale KI (Ollama) antwortet nicht. Läuft Ollama?')
   }
   if (!res.ok) throw localError(opts.model, res.status, await res.text().catch(() => ''))
-  const data = (await res.json()) as { message?: { content?: string; tool_calls?: OllamaToolCall[] } }
-  return fromOllamaResponse(data.message ?? {})
+  if (opts.onText) {
+    const streamed = await readChatStream(res, opts.onText)
+    const out = fromOllamaResponse(streamed.message)
+    if (streamed.stats) { out.stats = streamed.stats; log('info', 'Lokale KI', describeStats(streamed.stats)) }
+    return out
+  }
+  const data = (await res.json()) as OllamaChunk
+  const out = fromOllamaResponse(data.message ?? {})
+  const stats = statsFrom(data)
+  if (stats) { out.stats = stats; log('info', 'Lokale KI', describeStats(stats)) }
+  return out
 }
 
 /**
@@ -175,6 +249,44 @@ export async function unloadModel(model: string): Promise<boolean> {
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * Geschwindigkeitstest: ein kurzer, fester Auftrag. Gemessen wird nur das Schreiben der Antwort
+ * (ohne Laden des Modells, das wird getrennt gemeldet) – so lassen sich Modelle und Einstellungen vergleichen.
+ */
+export async function benchmarkModel(model: string, numCtx: number): Promise<Benchmark> {
+  let res: Response
+  try {
+    res = await fetch(`${ollamaUrl()}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'Zähle auf Deutsch von eins bis dreißig, durch Kommas getrennt.' }],
+        stream: false,
+        think: false,
+        keep_alive: KEEP_ALIVE,
+        options: { num_ctx: numCtx, temperature: 0, num_predict: 160 }
+      }),
+      signal: AbortSignal.timeout(300_000)
+    })
+  } catch {
+    throw new Error('Die lokale KI (Ollama) antwortet nicht. Läuft Ollama?')
+  }
+  if (!res.ok) throw localError(model, res.status, await res.text().catch(() => ''))
+  const data = (await res.json()) as OllamaChunk
+  const st = statsFrom(data)
+  if (!st || st.genMs <= 0) throw new Error('Ollama hat keine Messwerte geliefert.')
+  const load = await ollamaLoad()
+  return {
+    model,
+    tokensPerSecond: Math.round((st.genTokens / (st.genMs / 1000)) * 10) / 10,
+    promptTokensPerSecond: st.promptMs > 0 ? Math.round((st.promptTokens / (st.promptMs / 1000)) * 10) / 10 : null,
+    loadMs: st.loadMs,
+    totalMs: st.totalMs,
+    gpuPercent: load?.percentGpu ?? null
   }
 }
 

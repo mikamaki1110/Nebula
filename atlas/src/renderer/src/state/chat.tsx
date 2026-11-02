@@ -3,7 +3,7 @@ import type { Settings } from '@shared/types'
 
 export type ChatItem =
   | { kind: 'user'; id: number; text: string }
-  | { kind: 'atlas'; id: number; text: string }
+  | { kind: 'atlas'; id: number; text: string; streaming?: boolean }
   | { kind: 'step'; id: number; agent: string; text: string }
   | { kind: 'error'; id: number; text: string }
 
@@ -32,6 +32,8 @@ export function ChatProvider({ children }: { children: ReactNode }): JSX.Element
   const [speaking, setSpeaking] = useState(false)
   const [settings, setSettings] = useState<Settings | null>(null)
   const settingsRef = useRef<Settings | null>(null)
+  /** Id der Antwort, die gerade geschrieben wird (Streaming) */
+  const streamId = useRef<number | null>(null)
   settingsRef.current = settings
 
   useEffect(() => { void window.atlas.settings.get().then(setSettings) }, [])
@@ -57,12 +59,37 @@ export function ChatProvider({ children }: { children: ReactNode }): JSX.Element
   }, [])
 
   useEffect(() => window.atlas.chat.onEvent((e) => {
-    if (e.type === 'step') setItems((i) => [...i, { kind: 'step', id: nextId++, agent: e.agent, text: e.text }])
-    else if (e.type === 'message') {
-      setItems((i) => [...i, { kind: 'atlas', id: nextId++, text: e.text }])
+    /** Die laufende Antwort ist fertig geschrieben (oder wird von einem Arbeitsschritt abgelöst). */
+    const closeStream = (): void => {
+      const id = streamId.current
+      streamId.current = null
+      if (id !== null) setItems((i) => i.map((x) => (x.id === id && x.kind === 'atlas' ? { ...x, streaming: false } : x)))
+    }
+    if (e.type === 'delta') {
+      if (streamId.current === null) {
+        const id = nextId++
+        streamId.current = id
+        setItems((i) => [...i, { kind: 'atlas', id, text: e.text, streaming: true }])
+      } else {
+        const id = streamId.current
+        setItems((i) => i.map((x) => (x.id === id && x.kind === 'atlas' ? { ...x, text: x.text + e.text } : x)))
+      }
+    } else if (e.type === 'step') {
+      closeStream() // Text vor einem Werkzeugaufruf bleibt stehen, danach geht es mit Schritten weiter
+      setItems((i) => [...i, { kind: 'step', id: nextId++, agent: e.agent, text: e.text }])
+    } else if (e.type === 'message') {
+      const id = streamId.current
+      streamId.current = null
+      if (id !== null) setItems((i) => i.map((x) => (x.id === id && x.kind === 'atlas' ? { ...x, text: e.text, streaming: false } : x)))
+      else setItems((i) => [...i, { kind: 'atlas', id: nextId++, text: e.text }])
       if (settingsRef.current?.voiceOutput) speak(e.text)
-    } else if (e.type === 'error') setItems((i) => [...i, { kind: 'error', id: nextId++, text: e.text }])
-    else if (e.type === 'done') setBusy(false)
+    } else if (e.type === 'error') {
+      closeStream()
+      setItems((i) => [...i, { kind: 'error', id: nextId++, text: e.text }])
+    } else if (e.type === 'done') {
+      closeStream()
+      setBusy(false)
+    }
   }), [speak])
 
   const send = useCallback((text: string) => {
@@ -73,7 +100,7 @@ export function ChatProvider({ children }: { children: ReactNode }): JSX.Element
   }, [stopSpeaking])
 
   const cancel = useCallback(() => { void window.atlas.chat.cancel() }, [])
-  const reset = useCallback(() => { stopSpeaking(); setItems([]); setBusy(false); void window.atlas.chat.reset() }, [stopSpeaking])
+  const reset = useCallback(() => { stopSpeaking(); streamId.current = null; setItems([]); setBusy(false); void window.atlas.chat.reset() }, [stopSpeaking])
   const saveSettings = useCallback(async (patch: Partial<Settings>) => { setSettings(await window.atlas.settings.set(patch)) }, [])
 
   return (

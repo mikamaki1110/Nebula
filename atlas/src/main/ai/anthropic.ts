@@ -13,7 +13,10 @@ export type ContentBlock =
 export interface Message { role: 'user' | 'assistant'; content: string | ContentBlock[] }
 export interface Tool { name: string; description: string; input_schema: Record<string, unknown> }
 
-export interface ClaudeResponse { content: ContentBlock[]; stop_reason: string }
+/** Messwerte einer lokalen Antwort (aus Ollama). */
+export interface LocalStats { promptTokens: number; promptMs: number; genTokens: number; genMs: number; totalMs: number; loadMs: number }
+
+export interface ClaudeResponse { content: ContentBlock[]; stop_reason: string; stats?: LocalStats }
 
 export type KeySource = 'session' | 'env' | 'free' | 'local' | null
 
@@ -71,6 +74,8 @@ export async function callClaude(opts: {
   tools?: Tool[]
   signal?: AbortSignal
   maxTokens?: number
+  /** Nur lokal: bekommt die Antwort Stück für Stück, noch während sie entsteht. */
+  onText?: (delta: string) => void
 }): Promise<ClaudeResponse> {
   const source = await resolveSource()
   lastSource = source

@@ -1,7 +1,7 @@
 {
   "name": "nebula-desktop",
   "productName": "Nebula",
-  "version": "1.7.4",
+  "version": "1.7.5",
   "description": "Hardware-Monitor für Windows mit ATLAS, der KI-Zentrale: Temperaturen, Auslastung, Prozesse, Sicherheit, Reparatur und Aufräumen",
   "main": "main.js",
   "author": "Nebula",
